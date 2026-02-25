@@ -139,7 +139,10 @@ class AgentA(nn.Module):
         if mode == 'policy':
             aim_logits = self.policy_net(combined_base_input)
             if opponent_aim_sequence is None:
-                pass 
+                # Provide a zero-value for when NO opponent sequence is available
+                value = self.value_net(torch.cat([combined_base_input, torch.zeros(combined_base_input.shape[0], self.aim_seq_len * self.vqvae.quantizer.D).to(combined_base_input.device)], dim=1))
+                return aim_logits.view(-1, self.aim_seq_len, self.K), value.squeeze(-1)
+            
             embedded_opponent_aim = self.aim_embedding(opponent_aim_sequence)
             flattened_opponent_aim = embedded_opponent_aim.flatten(start_dim=1)
             combined_critic_input = torch.cat([combined_base_input, flattened_opponent_aim], dim=1)
@@ -467,7 +470,10 @@ def visualize(A_rewards, B_rewards, strategy_name):
     plt.ylabel('Total Reward')
     plt.legend()
     plt.grid(True)
-    plt.show()
+    filename = f"payoff_{strategy_name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
+    plt.savefig(filename)
+    print(f"Visualization saved to {filename}")
+    # plt.show() # Commented out to prevent hanging in non-interactive environments
 
 # =======================
 # Main Execution with CLI

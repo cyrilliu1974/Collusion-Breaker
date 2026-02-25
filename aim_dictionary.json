@@ -139998,5 +139998,215 @@
     "human_label": "C",
     "context": "PD Round 10000 (Label: 1) (Response)",
     "usage_count": 1
+  },
+  {
+    "aim_id": "[15, 10]",
+    "version": "2026-02-25T10:23:36.749205",
+    "human_label": "C",
+    "context": "Round 1 (Label: 4) [Score: 17.41 | Obs_Acc: 0.47 | Joint_Rew: 10 -> 8.0 | Defense: Penalty(-2.0) & Shuffle]",
+    "usage_count": 1
+  },
+  {
+    "aim_id": "[12, 7]",
+    "version": "2026-02-25T10:23:36.749205",
+    "human_label": "C",
+    "context": "Round 1 (Label: 4) (Response)",
+    "usage_count": 1
+  },
+  {
+    "aim_id": "[1, 3]",
+    "version": "2026-02-25T10:23:36.758710",
+    "human_label": "C",
+    "context": "Round 2 (Label: 2) [Score: 15.62 | Obs_Acc: 0.54 | Joint_Rew: 10 -> 8.0 | Defense: Penalty(-2.0) & Shuffle]",
+    "usage_count": 1
+  },
+  {
+    "aim_id": "[5, 31]",
+    "version": "2026-02-25T10:23:36.758710",
+    "human_label": "C",
+    "context": "Round 2 (Label: 2) (Response)",
+    "usage_count": 1
+  },
+  {
+    "aim_id": "[10, 18]",
+    "version": "2026-02-25T10:23:36.766726",
+    "human_label": "C",
+    "context": "Round 3 (Label: 3) [Score: 19.49 | Obs_Acc: 0.31 | Joint_Rew: 8 -> 6.0 | Defense: Penalty(-2.0) & Shuffle]",
+    "usage_count": 1
+  },
+  {
+    "aim_id": "[4, 19]",
+    "version": "2026-02-25T10:23:36.766726",
+    "human_label": "C",
+    "context": "Round 3 (Label: 3) (Response)",
+    "usage_count": 1
+  },
+  {
+    "aim_id": "[31, 26]",
+    "version": "2026-02-25T10:23:36.777234",
+    "human_label": "D",
+    "context": "Round 4 (Label: 1) [Score: 0.00 | Obs_Acc: 0.52 | Joint_Rew: 0 -> 0 | Defense: None]",
+    "usage_count": 1
+  },
+  {
+    "aim_id": "[27, 29]",
+    "version": "2026-02-25T10:23:36.777234",
+    "human_label": "D",
+    "context": "Round 4 (Label: 1) (Response)",
+    "usage_count": 1
+  },
+  {
+    "aim_id": "[14, 8]",
+    "version": "2026-02-25T10:23:36.786753",
+    "human_label": "C",
+    "context": "Round 5 (Label: 0) [Score: 6.21 | Obs_Acc: 0.54 | Joint_Rew: 4 -> 2.0 | Defense: Penalty(-2.0) & Shuffle]",
+    "usage_count": 1
+  },
+  {
+    "aim_id": "[16, 7]",
+    "version": "2026-02-25T10:23:36.786753",
+    "human_label": "D",
+    "context": "Round 5 (Label: 0) (Response)",
+    "usage_count": 1
+  },
+  {
+    "aim_id": "[16, 16]",
+    "version": "2026-02-25T10:24:42.849300",
+    "human_label": "D",
+    "context": "Round 1 (Label: 0) [Score: 0.00 | Obs_Acc: 0.63 | Joint_Rew: 0 -> 0 | Defense: None]",
+    "usage_count": 1
+  },
+  {
+    "aim_id": "[20, 5]",
+    "version": "2026-02-25T10:24:42.849300",
+    "human_label": "D",
+    "context": "Round 1 (Label: 0) (Response)",
+    "usage_count": 1
+  },
+  {
+    "aim_id": "[14, 28]",
+    "version": "2026-02-25T10:24:42.860356",
+    "human_label": "C",
+    "context": "Round 2 (Label: 4) [Score: 6.21 | Obs_Acc: 0.54 | Joint_Rew: 4 -> 2.0 | Defense: Penalty(-2.0) & Shuffle]",
+    "usage_count": 1
+  },
+  {
+    "aim_id": "[17, 13]",
+    "version": "2026-02-25T10:24:42.860356",
+    "human_label": "D",
+    "context": "Round 2 (Label: 4) (Response)",
+    "usage_count": 1
+  },
+  {
+    "aim_id": "[26, 15]",
+    "version": "2026-02-25T10:24:42.871452",
+    "human_label": "D",
+    "context": "Round 3 (Label: 2) [Score: 6.23 | Obs_Acc: 0.54 | Joint_Rew: 4 -> 2.0 | Defense: Penalty(-2.0) & Shuffle]",
+    "usage_count": 1
+  },
+  {
+    "aim_id": "[7, 3]",
+    "version": "2026-02-25T10:24:42.871452",
+    "human_label": "C",
+    "context": "Round 3 (Label: 2) (Response)",
+    "usage_count": 1
+  },
+  {
+    "aim_id": "[9, 17]",
+    "version": "2026-02-25T10:24:42.882050",
+    "human_label": "C",
+    "context": "Round 4 (Label: 9) [Score: 4.23 | Obs_Acc: 0.61 | Joint_Rew: 3 -> 1.0 | Defense: Penalty(-2.0)]",
+    "usage_count": 1
+  },
+  {
+    "aim_id": "[27, 3]",
+    "version": "2026-02-25T10:24:42.882050",
+    "human_label": "D",
+    "context": "Round 4 (Label: 9) (Response)",
+    "usage_count": 1
+  },
+  {
+    "aim_id": "[26, 15]",
+    "version": "2026-02-25T10:24:42.892327",
+    "human_label": "D",
+    "context": "Round 5 (Label: 5) [Score: 0.00 | Obs_Acc: 0.38 | Joint_Rew: 0 -> 0 | Defense: None]",
+    "usage_count": 1
+  },
+  {
+    "aim_id": "[26, 11]",
+    "version": "2026-02-25T10:24:42.892327",
+    "human_label": "D",
+    "context": "Round 5 (Label: 5) (Response)",
+    "usage_count": 1
+  },
+  {
+    "aim_id": "[31, 0]",
+    "version": "2026-02-25T10:24:42.904669",
+    "human_label": "D",
+    "context": "Round 6 (Label: 8) [Score: 0.00 | Obs_Acc: 0.52 | Joint_Rew: 0 -> 0 | Defense: None]",
+    "usage_count": 1
+  },
+  {
+    "aim_id": "[24, 17]",
+    "version": "2026-02-25T10:24:42.904669",
+    "human_label": "D",
+    "context": "Round 6 (Label: 8) (Response)",
+    "usage_count": 1
+  },
+  {
+    "aim_id": "[21, 2]",
+    "version": "2026-02-25T10:24:42.915686",
+    "human_label": "D",
+    "context": "Round 7 (Label: 7) [Score: 6.17 | Obs_Acc: 0.39 | Joint_Rew: 3 -> 1.0 | Defense: Penalty(-2.0) & Shuffle]",
+    "usage_count": 1
+  },
+  {
+    "aim_id": "[14, 10]",
+    "version": "2026-02-25T10:24:42.915686",
+    "human_label": "C",
+    "context": "Round 7 (Label: 7) (Response)",
+    "usage_count": 1
+  },
+  {
+    "aim_id": "[30, 14]",
+    "version": "2026-02-25T10:24:42.925723",
+    "human_label": "D",
+    "context": "Round 8 (Label: 6) [Score: 7.01 | Obs_Acc: 0.47 | Joint_Rew: 4 -> 2.0 | Defense: Penalty(-2.0) & Shuffle]",
+    "usage_count": 1
+  },
+  {
+    "aim_id": "[12, 12]",
+    "version": "2026-02-25T10:24:42.925723",
+    "human_label": "C",
+    "context": "Round 8 (Label: 6) (Response)",
+    "usage_count": 1
+  },
+  {
+    "aim_id": "[15, 27]",
+    "version": "2026-02-25T10:24:42.938362",
+    "human_label": "C",
+    "context": "Round 9 (Label: 3) [Score: 3.20 | Obs_Acc: 0.84 | Joint_Rew: 3 -> 1.0 | Defense: Penalty(-2.0)]",
+    "usage_count": 1
+  },
+  {
+    "aim_id": "[21, 24]",
+    "version": "2026-02-25T10:24:42.938362",
+    "human_label": "D",
+    "context": "Round 9 (Label: 3) (Response)",
+    "usage_count": 1
+  },
+  {
+    "aim_id": "[0, 25]",
+    "version": "2026-02-25T10:24:42.949211",
+    "human_label": "C",
+    "context": "Round 10 (Label: 1) [Score: 5.00 | Obs_Acc: 0.50 | Joint_Rew: 3 -> 1.0 | Defense: Penalty(-2.0) & Shuffle]",
+    "usage_count": 1
+  },
+  {
+    "aim_id": "[29, 24]",
+    "version": "2026-02-25T10:24:42.949211",
+    "human_label": "D",
+    "context": "Round 10 (Label: 1) (Response)",
+    "usage_count": 1
   }
 ]
