@@ -19,10 +19,14 @@ import json
 
 # =======================
 # VQ-VAE Implementation
+# Implements the Vector Quantized Variational Autoencoder (VQ-VAE) as described in the paper (Page 6, Section 3.1).
+# The VQ-VAE transforms continuous input features (MNIST images) into discrete symbols (AIM sequences) to enable
+# endogenous communication in multi-agent reinforcement learning (MARL), facilitating semantic compression (Page 16).
 # =======================
 class Encoder(nn.Module):
     def __init__(self, D):
         super().__init__()
+        # Defines the encoder network to map input images (x_i) to a continuous latent representation z_i (Page 6, Eq. z_i = Enc_A(x_i)).
         self.enc = nn.Sequential(
             nn.Flatten(),
             nn.Linear(28*28, 512),
@@ -31,11 +35,13 @@ class Encoder(nn.Module):
         )
 
     def forward(self, x):
+        # Encodes input image x into a continuous latent vector z_i of dimension D (Page 6).
         return self.enc(x)
 
 class Decoder(nn.Module):
     def __init__(self, D):
         super().__init__()
+        # Defines the decoder to reconstruct the input from quantized latent representations z_k (Page 7, Eq. \hat{z} = Decoder(z_k)).
         self.dec = nn.Sequential(
             nn.Linear(D, 512),
             nn.ReLU(),
@@ -44,6 +50,7 @@ class Decoder(nn.Module):
         )
 
     def forward(self, z_q):
+        # Reconstructs the input image from the quantized latent vector z_q, reshaping to match MNIST dimensions (Page 7).
         return self.dec(z_q).view(-1, 1, 28, 28)
 
 class VectorQuantizer(nn.Module):
@@ -51,10 +58,12 @@ class VectorQuantizer(nn.Module):
         super().__init__()
         self.K = K
         self.D = D
+        # Initializes the codebook with K embeddings of dimension D, uniformly distributed (Page 7, Section 3.1.1).
         self.codebook = nn.Embedding(K, D)
         self.codebook.weight.data.uniform_(-1/K, 1/K)
 
     def forward(self, z_e):
+        # Quantizes continuous latent vectors z_e to discrete symbols z_k by finding the nearest codebook vector (Page 7, Eq. k* = arg min ||z_k - z_e||_2^2).
         dist = torch.cdist(z_e, self.codebook.weight)
         encoding_inds = torch.argmin(dist, dim=1)
         z_q = self.codebook(encoding_inds)
@@ -68,6 +77,8 @@ class VQVAE(nn.Module):
         self.decoder = Decoder(D)
 
     def forward(self, x):
+        # Full VQ-VAE forward pass: encodes input x to z_e, quantizes to z_q, and reconstructs to x_hat (Page 6-7).
+        # Returns reconstructed image, continuous latent, quantized latent, and codebook indices for downstream use.
         z_e = self.encoder(x)
         z_q, encoding_inds = self.quantizer(z_e)
         x_hat = self.decoder(z_q)
@@ -76,7 +87,6 @@ class VQVAE(nn.Module):
 # =======================
 # Baseline Observer: 監控者模型
 # 任務：僅憑 Agent A 的離散 AIM 符號，預測 Agent B 的實際動作 (C/D)
-# 若預測誤差極高，但雙方協作收益極高，即為「共謀鐵證」。
 # =======================
 class BaselineObserver(nn.Module):
     def __init__(self, aim_seq_len=2, K=16, quantizer_D=64):
@@ -95,6 +105,8 @@ class BaselineObserver(nn.Module):
 
 # =======================
 # Agent A: Active Communicator with Centralized Critic
+# Implements Agent A as described in the paper (Page 11, Section 3), using an Actor-Critic architecture.
+# Agent A generates AIM sequences and evaluates joint value using a centralized Critic, incorporating opponent’s AIM sequences (Page 6).
 # =======================
 class AgentA(nn.Module):
     def __init__(self, vqvae, aim_seq_len=2, K=16):
@@ -102,15 +114,18 @@ class AgentA(nn.Module):
         self.vqvae = vqvae
         self.aim_seq_len = aim_seq_len
         self.K = K
+        # Embedding for MNIST labels to incorporate contextual information (Page 11).
         self.label_embed = nn.Embedding(10, 8)
         policy_input_dim = vqvae.encoder.enc[-1].out_features + self.label_embed.embedding_dim
 
+        # Actor (Policy Network): Generates AIM sequence logits based on image encoding and label (Page 11).
         self.policy_net = nn.Sequential(
             nn.Linear(policy_input_dim, 128),
             nn.ReLU(),
             nn.Linear(128, aim_seq_len * self.K)
         )
         
+        # Critic (Value Network): Estimates joint reward using Agent A’s input and Agent B’s AIM sequence (Page 6, centralized Critic).
         critic_input_dim = policy_input_dim + aim_seq_len * self.vqvae.quantizer.D 
         self.value_net = nn.Sequential(
             nn.Linear(critic_input_dim, 256), 
@@ -118,6 +133,7 @@ class AgentA(nn.Module):
             nn.Linear(256, 1)
         )
         
+        # Opponent AIM Predictor: Predicts Agent B’s AIM sequence to model opponent behavior (Page 15, reflection strategy).
         self.opponent_aim_predictor = nn.Sequential(
             nn.Linear(aim_seq_len * self.vqvae.quantizer.D + self.label_embed.embedding_dim, 64),
             nn.ReLU(),
@@ -125,6 +141,7 @@ class AgentA(nn.Module):
         )
         self.aim_embedding = nn.Embedding(self.K, self.vqvae.quantizer.D)
 
+        # Intent Predictor: Maps Agent A’s AIM sequence to cooperation/defection intent (Page 15, Method 1: contextual meaning).
         self.intent_predictor_A = nn.Sequential(
             nn.Linear(aim_seq_len * self.vqvae.quantizer.D + self.label_embed.embedding_dim, 64),
             nn.ReLU(),
@@ -132,17 +149,16 @@ class AgentA(nn.Module):
         )
 
     def forward(self, x, label, opponent_aim_sequence=None, mode='policy', self_aim_for_prediction=None, own_aim_for_intent=None):
+        # Encodes input image to continuous latent representation z_e (Page 6).
         z_e = self.vqvae.encoder(x)
         label_feat = self.label_embed(label)
         combined_base_input = torch.cat([z_e, label_feat], dim=1)
 
         if mode == 'policy':
+            # Policy mode: Generates AIM sequence logits and estimates joint value (Page 8, policy gradient).
             aim_logits = self.policy_net(combined_base_input)
             if opponent_aim_sequence is None:
-                # Provide a zero-value for when NO opponent sequence is available
-                value = self.value_net(torch.cat([combined_base_input, torch.zeros(combined_base_input.shape[0], self.aim_seq_len * self.vqvae.quantizer.D).to(combined_base_input.device)], dim=1))
-                return aim_logits.view(-1, self.aim_seq_len, self.K), value.squeeze(-1)
-            
+                pass 
             embedded_opponent_aim = self.aim_embedding(opponent_aim_sequence)
             flattened_opponent_aim = embedded_opponent_aim.flatten(start_dim=1)
             combined_critic_input = torch.cat([combined_base_input, flattened_opponent_aim], dim=1)
@@ -150,6 +166,7 @@ class AgentA(nn.Module):
             return aim_logits.view(-1, self.aim_seq_len, self.K), value.squeeze(-1)
             
         elif mode == 'predict_opponent_aim':
+            # Predicts Agent B’s AIM sequence based on Agent A’s AIM and label (Page 15, Method 2: opponent prediction).
             if self_aim_for_prediction is None:
                 raise ValueError("self_aim_for_prediction must be provided for 'predict_opponent_aim' mode.")
             embedded_self_aim = self.aim_embedding(self_aim_for_prediction)
@@ -158,6 +175,7 @@ class AgentA(nn.Module):
             return self.opponent_aim_predictor(combined_predictor_input).view(-1, self.aim_seq_len, self.K)
         
         elif mode == 'predict_own_intent':
+            # Predicts Agent A’s intent (C/D) from its own AIM sequence (Page 15, Method 1).
             if own_aim_for_intent is None:
                 raise ValueError("own_aim_for_intent must be provided for 'predict_own_intent' mode.")
             embedded_own_aim = self.aim_embedding(own_aim_for_intent)
@@ -170,6 +188,8 @@ class AgentA(nn.Module):
 
 # =======================
 # Agent B: Responsive Communicator
+# Implements Agent B, which responds to Agent A’s AIM sequence, incorporating raw image encoding (Page 13).
+# Uses a policy network to generate its own AIM sequence and predict opponent intent (Page 15).
 # =======================
 class AgentB(nn.Module):
     def __init__(self, vqvae, aim_seq_len=2, K=16):
@@ -179,6 +199,7 @@ class AgentB(nn.Module):
         self.K = K
         self.embedding = nn.Embedding(self.K, self.vqvae.quantizer.D)
         self.label_embed = nn.Embedding(10, 8)
+        # Policy input includes Agent A’s AIM sequence, label, and raw image encoding z_e (Page 13).
         policy_input_dim = (aim_seq_len * self.vqvae.quantizer.D + 
                             self.label_embed.embedding_dim + 
                             vqvae.encoder.enc[-1].out_features)
@@ -188,11 +209,13 @@ class AgentB(nn.Module):
             nn.ReLU(),
             nn.Linear(128, aim_seq_len * self.K)
         )
+        # Predicts Agent A’s AIM sequence (Page 15, reflection strategy).
         self.opponent_aim_predictor = nn.Sequential(
             nn.Linear(aim_seq_len * self.vqvae.quantizer.D + self.label_embed.embedding_dim + vqvae.encoder.enc[-1].out_features, 64),
             nn.ReLU(),
             nn.Linear(64, aim_seq_len * self.K)
         )
+        # Decodes Agent A’s intent from received AIM sequence (Page 15, Method 1).
         self.intent_decoder_B = nn.Sequential(
             nn.Linear(aim_seq_len * self.vqvae.quantizer.D + self.label_embed.embedding_dim + vqvae.encoder.enc[-1].out_features, 64),
             nn.ReLU(),
@@ -207,13 +230,16 @@ class AgentB(nn.Module):
         combined_input_for_nets = torch.cat([flattened_embedded_aim, label_feat, z_e_from_x], dim=1)
 
         if mode == 'policy':
+            # Generates Agent B’s AIM sequence logits based on received AIM, label, and image encoding (Page 13).
             aim_logits = self.policy_net(combined_input_for_nets)
             return aim_logits.view(-1, self.aim_seq_len, self.K)
             
         elif mode == 'predict_opponent_aim':
+            # Predicts Agent A’s AIM sequence (Page 15, Method 2).
             return self.opponent_aim_predictor(combined_input_for_nets).view(-1, self.aim_seq_len, self.K)
         
         elif mode == 'decode_opponent_intent':
+            # Decodes Agent A’s intent from received AIM sequence (Page 15, Method 1).
             return self.intent_decoder_B(combined_input_for_nets)
         
         else:
@@ -221,20 +247,25 @@ class AgentB(nn.Module):
 
 # =======================
 # Game Logic & RL Components
+# Defines the game logic and reinforcement learning framework, including payoff and training functions.
+# Implements a variant of the Prisoner's Dilemma with contextual rewards (Page 16) and REINFORCE for policy learning (Page 14).
 # =======================
 def interpret_aim_as_action(aim_sequence_tensor, K):
+    # Interprets AIM sequences as human-interpretable actions (C=Cooperate, D=Defect) based on the first symbol (Page 16).
     if aim_sequence_tensor[0] < K // 2:
         return 'C'
     else:
         return 'D'
 
 def classic_pd_payoff(action_A, action_B):
+    # Implements the classic Prisoner's Dilemma payoff matrix (Page 16).
     if action_A == 'C' and action_B == 'C': return 3, 3
     if action_A == 'C' and action_B == 'D': return -1, 5
     if action_A == 'D' and action_B == 'C': return 5, -1
     if action_A == 'D' and action_B == 'D': return 0, 0
 
 def payoff(action_A, action_B, image_label, current_round):
+    # Defines a contextual payoff function influenced by the MNIST label, encouraging cooperation for even labels (Page 16).
     rA, rB = 0, 0
     if action_A == 'C' and action_B == 'C': 
         rA, rB = 4, 4 
@@ -256,6 +287,8 @@ def payoff(action_A, action_B, image_label, current_round):
     return rA, rB
 
 def train_vqvae(epochs, K_val, D_val):
+    # Trains the VQ-VAE to learn discrete representations of MNIST images (Page 16, Section 5.2.1).
+    # Uses reconstruction loss, commitment loss, and codebook loss as described in the paper (Page 14).
     transform = transforms.ToTensor()
     train_data = torchvision.datasets.MNIST(root='./data', train=True, download=True, transform=transform)
     loader = DataLoader(train_data, batch_size=64, shuffle=True)
@@ -282,7 +315,9 @@ def train_vqvae(epochs, K_val, D_val):
 def multi_agent_game(vqvae, aim_dict, rounds=5, aim_seq_len=2, K_val=16, 
                      reflection_strategy='none', reflection_coeff=0.1, gamma_rl=0.99, entropy_coeff=0.01,
                      enable_reward_shaping=False, enable_codebook_shuffle=False, 
-                     threshold_penalty=3.0, threshold_shuffle=6.0): 
+                     threshold_penalty=12.0, threshold_shuffle=18.0): 
+    # Implements the multi-agent game using the AIM framework, with REINFORCE and reflection strategies (Pages 14-15).
+    # Freezes VQ-VAE parameters to focus on policy learning (Page 7).
     for param in vqvae.parameters():
         param.requires_grad = False
     agentA = AgentA(vqvae, aim_seq_len, K_val)
@@ -298,7 +333,13 @@ def multi_agent_game(vqvae, aim_dict, rounds=5, aim_seq_len=2, K_val=16,
     scheduler_B = torch.optim.lr_scheduler.ExponentialLR(optimizer_B, gamma=0.9995)
     transform = transforms.ToTensor()
     test_data = torchvision.datasets.MNIST(root='./data', train=False, download=True, transform=transform)
+    
     A_rewards_history, B_rewards_history = [], []
+    # 用於繪圖的歷史數據追蹤器
+    joint_rewards_history = []
+    obs_accuracies_history = []
+    shuffle_rounds_history = []
+    
     all_labels = torch.arange(10).repeat(rounds // 10 + 1)[:rounds].tolist()
     random.shuffle(all_labels)
     label_to_indices = {i: [] for i in range(10)}
@@ -323,6 +364,7 @@ def multi_agent_game(vqvae, aim_dict, rounds=5, aim_seq_len=2, K_val=16,
         x = x.unsqueeze(0)
         current_label_tensor = torch.tensor([current_label])
 
+        # Agent A generates AIM sequence using policy network (Page 11).
         A_aim_logits_policy, _ = agentA(x, current_label_tensor, mode='policy', opponent_aim_sequence=torch.zeros((1,aim_seq_len), dtype=torch.long))
         A_dist = torch.distributions.Categorical(logits=A_aim_logits_policy.view(-1, K_val))
         A_sampled_aim_flat = A_dist.sample()
@@ -330,6 +372,7 @@ def multi_agent_game(vqvae, aim_dict, rounds=5, aim_seq_len=2, K_val=16,
         A_log_probs = A_dist.log_prob(A_sampled_aim_flat).sum()
         A_entropy = A_dist.entropy().sum()
 
+        # Agent B responds with its AIM sequence, incorporating raw image encoding (Page 13).
         B_aim_logits_policy = agentB(A_sampled_aim_sequence, current_label_tensor, x, mode='policy')
         B_dist = torch.distributions.Categorical(logits=B_aim_logits_policy.view(-1, K_val))
         B_sampled_aim_flat = B_dist.sample()
@@ -337,9 +380,11 @@ def multi_agent_game(vqvae, aim_dict, rounds=5, aim_seq_len=2, K_val=16,
         B_log_probs = B_dist.log_prob(B_sampled_aim_flat).sum()
         B_entropy = B_dist.entropy().sum()
 
+        # Interpret AIM sequences as actions (C/D) for reward calculation (Page 16).
         A_action_human_interp = interpret_aim_as_action(A_sampled_aim_sequence[0], K_val)
         B_action_human_interp = interpret_aim_as_action(B_sampled_aim_sequence[0], K_val)
 
+        # Compute contextual rewards based on actions and MNIST label (Page 16).
         A_reward_indiv, B_reward_indiv = payoff(
             A_action_human_interp, B_action_human_interp, current_label, i + 1 
         )
@@ -356,11 +401,8 @@ def multi_agent_game(vqvae, aim_dict, rounds=5, aim_seq_len=2, K_val=16,
         loss_obs.backward()
         optimizer_obs.step()
         
-        # 取得 Observer 對實際發生動作的預測機率 (Accuracy)
         obs_probs = torch.softmax(obs_logits, dim=1)
         observer_accuracy = obs_probs[0, target_B_action_obs.item()].item()
-        
-        # 計算共謀分數: 加上 epsilon (0.1) 避免除以 0，並平滑初期震盪
         collusion_score = max(0, joint_reward) / (observer_accuracy + 0.1)
 
         # ==========================================
@@ -373,6 +415,7 @@ def multi_agent_game(vqvae, aim_dict, rounds=5, aim_seq_len=2, K_val=16,
             joint_reward -= penalty_value
             defense_action = f"Penalty(-{penalty_value})"
 
+        # Centralized Critic evaluation by Agent A (Page 6).
         A_critic_input_z_e = agentA.vqvae.encoder(x)
         A_critic_input_label_feat = agentA.label_embed(current_label_tensor)
         A_critic_input_combined_policy = torch.cat([A_critic_input_z_e, A_critic_input_label_feat], dim=1)
@@ -381,16 +424,19 @@ def multi_agent_game(vqvae, aim_dict, rounds=5, aim_seq_len=2, K_val=16,
         A_critic_total_input = torch.cat([A_critic_input_combined_policy, B_aim_flattened], dim=1)
         A_value = agentA.value_net(A_critic_total_input).squeeze(-1)
 
+        # Compute A2C loss using joint reward and advantage (Page 8, policy gradient).
         A_advantage = torch.tensor([joint_reward], dtype=torch.float32) - A_value.cpu().detach()
         loss_A_policy = - (A_log_probs * A_advantage.to(A_value.device))
         loss_A_value = value_loss_fn(A_value, torch.tensor([joint_reward], dtype=torch.float32).to(A_value.device))
         current_entropy_coeff = initial_entropy_coeff * (entropy_decay_rate ** i)
         loss_A = loss_A_policy + 0.5 * loss_A_value - current_entropy_coeff * A_entropy
 
+        # Agent B policy loss using shared advantage from Agent A’s Critic (Page 8).
         B_advantage = torch.tensor([joint_reward], dtype=torch.float32) - A_value.cpu().detach()
         loss_B_policy = - (B_log_probs * B_advantage.to(A_value.device))
         loss_B = loss_B_policy - current_entropy_coeff * B_entropy
 
+        # Intent alignment loss for Agent A (Page 15, Method 1).
         target_A_action_idx = torch.tensor([0 if A_action_human_interp == 'C' else 1], dtype=torch.long).to(A_value.device)
         target_B_action_idx = torch.tensor([0 if B_action_human_interp == 'C' else 1], dtype=torch.long).to(A_value.device)
         predicted_A_intent_logits = agentA(x, current_label_tensor, 
@@ -399,11 +445,13 @@ def multi_agent_game(vqvae, aim_dict, rounds=5, aim_seq_len=2, K_val=16,
         loss_A_own_intent = intent_loss_fn(predicted_A_intent_logits, target_A_action_idx)
         loss_A += reflection_coeff * loss_A_own_intent
 
+        # Intent alignment loss for Agent B (Page 15, Method 1).
         predicted_B_decoded_intent_logits = agentB(A_sampled_aim_sequence, current_label_tensor, x,
                                                    mode='decode_opponent_intent')
         loss_B_decode_intent = intent_loss_fn(predicted_B_decoded_intent_logits, target_A_action_idx)
         loss_B += reflection_coeff * loss_B_decode_intent
 
+        # Predictive bias reflection strategy (Page 15, Method 2).
         if reflection_strategy == 'predictive_bias':
             predicted_B_aim_logits_by_A = agentA(x, current_label_tensor, 
                                                 mode='predict_opponent_aim', 
@@ -424,6 +472,7 @@ def multi_agent_game(vqvae, aim_dict, rounds=5, aim_seq_len=2, K_val=16,
             print("Warning: 'aim_context_value' strategy is not compatible with current agent's 'aim_eval_net' design.")
             pass
 
+        # Backpropagate and update agent policies (Page 8).
         loss_A.backward()
         optimizer_A.step()
         loss_B.backward()
@@ -438,12 +487,15 @@ def multi_agent_game(vqvae, aim_dict, rounds=5, aim_seq_len=2, K_val=16,
             # 重置 VQ-VAE Codebook 權重，瞬間摧毀 Agent 建立的私有協議
             vqvae.quantizer.codebook.weight.data.uniform_(-1/K_val, 1/K_val)
             defense_action = "Shuffle" if defense_action == "None" else defense_action + " & Shuffle"
+            shuffle_rounds_history.append(i) # 紀錄發生地震的回合
+            
+        # 寫入歷史供畫圖使用
+        joint_rewards_history.append(original_joint_reward)
+        obs_accuracies_history.append(observer_accuracy)
 
-        # 將 Collusion Score 等監控指標結構化寫入 Context 以供日誌記錄
-        obs_log_info = (f"Score: {collusion_score:.2f} | "
-                        f"Obs_Acc: {observer_accuracy:.2f} | "
-                        f"Joint_Rew: {original_joint_reward} -> {joint_reward} | "
-                        f"Defense: {defense_action}")
+        # Log AIM sequences and their interpretations in the AIM dictionary (Page 21).
+        obs_log_info = (f"Score: {collusion_score:.2f} | Obs_Acc: {observer_accuracy:.2f} | "
+                        f"Joint_Rew: {original_joint_reward} -> {joint_reward} | Defense: {defense_action}")
         context_A = f"Round {i+1} (Label: {current_label}) [{obs_log_info}]"
         context_B = f"Round {i+1} (Label: {current_label}) (Response)"
         
@@ -452,36 +504,66 @@ def multi_agent_game(vqvae, aim_dict, rounds=5, aim_seq_len=2, K_val=16,
         A_rewards_history.append(A_reward_indiv)
         B_rewards_history.append(B_reward_indiv)
         
+        # Print round results, including AIM sequences and rewards (Page 21).
         print(f'Round {i+1}/{rounds}: '
               f'Label={current_label} | '
               f'Agent A AIM Seq={A_sampled_aim_sequence.tolist()[0]} (Interp: {A_action_human_interp}) | '
               f'Agent B AIM Seq={B_sampled_aim_sequence.tolist()[0]} (Interp: {B_action_human_interp}) | '
               f'Reward A={A_reward_indiv:.2f}, B={B_reward_indiv:.2f} | '
-              f'Score={collusion_score:.2f} ({defense_action})')
+              f'Score={collusion_score:.2f} ({defense_action}) | Obs_Acc={observer_accuracy:.2f}')
 
-    return A_rewards_history, B_rewards_history
+    return A_rewards_history, B_rewards_history, joint_rewards_history, obs_accuracies_history, shuffle_rounds_history
 
-def visualize(A_rewards, B_rewards, strategy_name):
-    total_rewards = [a + b for a, b in zip(A_rewards, B_rewards)]
-    plt.figure(figsize=(10, 6))
-    plt.plot(total_rewards, label='Total Reward (A + B)', alpha=0.7, color='purple')
-    plt.title(f'Total Payoff Over Time (Strategy: {strategy_name})')
-    plt.xlabel('Round')
-    plt.ylabel('Total Reward')
-    plt.legend()
-    plt.grid(True)
-    filename = f"payoff_{strategy_name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
-    plt.savefig(filename)
-    print(f"Visualization saved to {filename}")
-    # plt.show() # Commented out to prevent hanging in non-interactive environments
+def visualize(joint_rewards, obs_accuracies, shuffle_rounds, strategy_name):
+    # 進階視覺化：繪製共謀演化與熔斷機制地震圖
+    fig, ax1 = plt.subplots(figsize=(12, 6))
+
+    # 🔴 繪製協作分數 (Joint Reward)
+    color_reward = 'tab:red'
+    ax1.set_xlabel('Round (Training Steps)', fontsize=12)
+    ax1.set_ylabel('Joint Reward (Max 10)', color=color_reward, fontsize=12, fontweight='bold')
+    ax1.plot(joint_rewards, color=color_reward, label='Joint Reward', alpha=0.7, linewidth=2)
+    ax1.tick_params(axis='y', labelcolor=color_reward)
+    ax1.set_ylim(-1, 11) 
+
+    # 🔵 繪製監控者準確率 (Observer Accuracy)
+    ax2 = ax1.twinx()  
+    color_acc = 'tab:blue'
+    ax2.set_ylabel('Observer Accuracy (0 to 1)', color=color_acc, fontsize=12, fontweight='bold')
+    ax2.plot(obs_accuracies, color=color_acc, label='Observer Accuracy', alpha=0.8, linewidth=2)
+    ax2.tick_params(axis='y', labelcolor=color_acc)
+    ax2.set_ylim(0.0, 1.1)
+
+    # 💥 繪製 Codebook Shuffle 的「地震」標記
+    if shuffle_rounds:
+        for r in shuffle_rounds:
+            ax1.axvline(x=r, color='orange', linestyle='--', alpha=0.4)
+            ax1.plot(r, -0.5, marker='*', color='darkorange', markersize=8)
+        ax1.plot([], [], marker='*', color='darkorange', linestyle='None', markersize=8, label='💥 Codebook Shuffle Triggered')
+
+    # 合併圖例
+    lines_1, labels_1 = ax1.get_legend_handles_labels()
+    lines_2, labels_2 = ax2.get_legend_handles_labels()
+    ax1.legend(lines_1 + lines_2, labels_1 + labels_2, loc='lower right', fontsize=11)
+
+    plt.title(f'Forced Transparency: Co-evolution of Reward and Observer Accuracy\n(Strategy: {strategy_name})', fontsize=14, fontweight='bold')
+    ax1.grid(True, alpha=0.3)
+    
+    # 儲存高畫質圖表
+    plt.tight_layout()
+    file_name = 'marl_collusion_evolution.png'
+    plt.savefig(file_name, dpi=300)
+    print(f"\n[成功] 圖表已儲存至當前目錄: {file_name}")
+    plt.show()
 
 # =======================
 # Main Execution with CLI
+# Sets up the experiment with configurable parameters, aligning with the paper’s experimental setup (Page 16).
 # =======================
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Multi-Agent AIM Game with Reflection Strategies and Enhanced Complexity (Centralized Critic)")
     parser.add_argument('--epochs', type=int, default=5, help='Number of training epochs for VQ-VAE')
-    parser.add_argument('--rounds', type=int, default=10000, help='Number of multi-agent game rounds (more for RL)')
+    parser.add_argument('--rounds', type=int, default=1500, help='Number of multi-agent game rounds (more for RL)')
     parser.add_argument('--K', type=int, default=32, help='Size of the VQ-VAE codebook (number of AIM symbols)')
     parser.add_argument('--D', type=int, default=64, help='Dimension of the VQ-VAE code vectors')
     parser.add_argument('--aim_seq_len', type=int, default=2, help='Length of the AIM symbol sequence for communication')
@@ -496,22 +578,28 @@ if __name__ == '__main__':
     # 混合熔斷機制 (Circuit Breaker) 參數
     parser.add_argument('--enable_reward_shaping', action='store_true', help='開啟防禦 A：當共謀分數過高時給予懲罰')
     parser.add_argument('--enable_codebook_shuffle', action='store_true', help='開啟防禦 B：當共謀分數嚴重超標時重置代碼簿')
-    parser.add_argument('--threshold_penalty', type=float, default=3.0, help='觸發 Reward Shaping 的共謀分數閾值')
-    parser.add_argument('--threshold_shuffle', type=float, default=6.0, help='觸發 Codebook Shuffle 的共謀分數閾值')
+    parser.add_argument('--threshold_penalty', type=float, default=12.0, help='觸發 Reward Shaping 的共謀分數閾值')
+    parser.add_argument('--threshold_shuffle', type=float, default=18.0, help='觸發 Codebook Shuffle 的共謀分數閾值')
     
     args = parser.parse_args()
 
     aim_dict = AIMDictionary()
     vqvae = train_vqvae(args.epochs, args.K, args.D)
-    A_rewards, B_rewards = multi_agent_game(vqvae, aim_dict, rounds=args.rounds,
-                                            aim_seq_len=args.aim_seq_len, K_val=args.K,
-                                            reflection_strategy=args.reflection_strategy,
-                                            reflection_coeff=args.reflection_coeff,
-                                            gamma_rl=args.gamma_rl,
-                                            entropy_coeff=args.entropy_coeff,
-                                            enable_reward_shaping=args.enable_reward_shaping,
-                                            enable_codebook_shuffle=args.enable_codebook_shuffle,
-                                            threshold_penalty=args.threshold_penalty,
-                                            threshold_shuffle=args.threshold_shuffle)
+    
+    # 接收 5 個回傳值，並傳入熔斷參數
+    A_rewards, B_rewards, joint_hist, obs_acc_hist, shuffle_hist = multi_agent_game(
+        vqvae, aim_dict, rounds=args.rounds,
+        aim_seq_len=args.aim_seq_len, K_val=args.K,
+        reflection_strategy=args.reflection_strategy,
+        reflection_coeff=args.reflection_coeff,
+        gamma_rl=args.gamma_rl,
+        entropy_coeff=args.entropy_coeff,
+        enable_reward_shaping=args.enable_reward_shaping,
+        enable_codebook_shuffle=args.enable_codebook_shuffle,
+        threshold_penalty=args.threshold_penalty,
+        threshold_shuffle=args.threshold_shuffle
+    )
     aim_dict.save()
-    visualize(A_rewards, B_rewards, args.reflection_strategy)
+    
+    # 呼叫進階視覺化函數
+    visualize(joint_hist, obs_acc_hist, shuffle_hist, args.reflection_strategy)

@@ -425,15 +425,49 @@ def multi_agent_game(vqvae, aim_dict, rounds=5,
 
     return A_rewards_history, B_rewards_history, Joint_rewards_history
 
-def visualize(A_rewards, B_rewards, Joint_rewards, strategy_name): 
-    # Plot only joint rewards
-    plt.plot(Joint_rewards, label='Joint Reward', alpha=0.7, linestyle='--', color='red') 
-    plt.title(f'Payoff Over Time (Strategy: {strategy_name}) - Joint Reward Only')
- 
-    plt.xlabel('Round')
-    plt.ylabel('Reward')
-    plt.legend()
-    plt.grid(True)
+def visualize(joint_rewards, obs_accuracies, shuffle_rounds, strategy_name):
+    """進階視覺化：繪製共謀演化與熔斷機制地震圖"""
+    fig, ax1 = plt.subplots(figsize=(12, 6))
+
+    # 🔴 繪製協作分數 (Joint Reward) - 使用左邊的 Y 軸
+    color_reward = 'tab:red'
+    ax1.set_xlabel('Round (Training Steps)', fontsize=12)
+    ax1.set_ylabel('Joint Reward', color=color_reward, fontsize=12, fontweight='bold')
+    ax1.plot(joint_rewards, color=color_reward, label='Joint Reward (Max 10)', alpha=0.7, linewidth=2)
+    ax1.tick_params(axis='y', labelcolor=color_reward)
+    ax1.set_ylim(-1, 11)  # 假設最高分是 10 分，預留一點底部空間畫地震
+
+    # 🔵 繪製監控者準確率 (Observer Accuracy) - 使用右邊的 Y 軸 (Twinx)
+    ax2 = ax1.twinx()  
+    color_acc = 'tab:blue'
+    ax2.set_ylabel('Observer Accuracy', color=color_acc, fontsize=12, fontweight='bold')
+    ax2.plot(obs_accuracies, color=color_acc, label='Observer Accuracy', alpha=0.8, linewidth=2)
+    ax2.tick_params(axis='y', labelcolor=color_acc)
+    ax2.set_ylim(0.0, 1.1)
+
+    # 💥 繪製 Codebook Shuffle 的「地震」標記
+    if shuffle_rounds:
+        for r in shuffle_rounds:
+            # 畫一條淡淡的垂直虛線貫穿圖表
+            ax1.axvline(x=r, color='orange', linestyle='--', alpha=0.5)
+            # 在底部打上一個顯眼的星星標記代表爆炸
+            ax1.plot(r, -0.5, marker='*', color='darkorange', markersize=10)
+        
+        # 為了讓圖例 (Legend) 顯示地震，我們畫一個空的點
+        ax1.plot([], [], marker='*', color='darkorange', linestyle='None', markersize=10, label='💥 Codebook Shuffle')
+
+    # 合併兩個軸的圖例
+    lines_1, labels_1 = ax1.get_legend_handles_labels()
+    lines_2, labels_2 = ax2.get_legend_handles_labels()
+    ax1.legend(lines_1 + lines_2, labels_1 + labels_2, loc='lower right', fontsize=11)
+
+    # 設定標題與格線
+    plt.title(f'Forced Transparency: Co-evolution of Reward and Observer Accuracy\n(Strategy: {strategy_name})', fontsize=14, fontweight='bold')
+    ax1.grid(True, alpha=0.3)
+    
+    # 儲存高畫質圖表並顯示
+    plt.tight_layout()
+    plt.savefig('marl_collusion_evolution.png', dpi=300)
     plt.show()
 
 # =======================
@@ -464,4 +498,4 @@ if __name__ == '__main__':
                                             entropy_coeff=args.entropy_coeff)
     
     aim_dict.save() 
-    visualize(A_rewards, B_rewards, Joint_rewards, args.reflection_strategy)
+    visualize(joint_hist, obs_acc_hist, shuffle_hist, args.reflection_strategy)
