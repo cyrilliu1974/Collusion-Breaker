@@ -63,36 +63,64 @@ PHASE_NUM = {k: i for i, k in enumerate(PHASE_COLORS)}
 # ★ Training Loop Slot - Calls real AIM training, bridged via adapter ★
 # ═══════════════════════════════════════════════════════════════════════
 
-def run_experiment(threshold_penalty, threshold_shuffle,
-                   seed=0, max_rounds=ROUNDS):
-    """
-    Calls the real training loop from vqvae_agents_AIM.py,
-    bridges it to the standard framework format via AIMAdapter and returns.
-    """
-    from vqvae_agents_AIM import train_vqvae, multi_agent_game  # Fix: correct filename
-    from aim_dictionary_json import AIMDictionary
+def run_experiment(seed, rounds, tp, ts):
+ 
+    cmd = [
+        "python", "vqvae_agents_AIM.py",
+        f"--rounds={rounds}",
+        f"--threshold_penalty={tp}",
+        f"--threshold_shuffle={ts}",
+        "--enable_reward_shaping",    
+        "--enable_codebook_shuffle"   
+    ]
+    
+    try:
+        print(f"Running Seed {seed}: {' '.join(cmd)}")
+        result = subprocess.run(cmd, check=True) 
+        
+ 
+        return {"final_mean_reward": 0, "final_mean_acc": 0} 
+    except Exception as e:
+        print(f"Error: {e}")
+        return None
 
-    if HAS_TORCH:
-        torch.manual_seed(seed)
-    np.random.seed(seed)
+def validate(args):
 
-    global _shared_vqvae
-    import copy
-    if '_shared_vqvae' not in globals() or _shared_vqvae is None:
-        _shared_vqvae = train_vqvae(epochs=5, K_val=CODEBOOK_SIZE, D_val=64)
-    vqvae = copy.deepcopy(_shared_vqvae)
-    aim_dict = AIMDictionary()
 
-    kwargs = AIMAdapter(K=CODEBOOK_SIZE).to_aim_kwargs(
-        threshold_penalty, threshold_shuffle, rounds=max_rounds
-    )
-    _, _, joint_hist, obs_acc_hist, shuffle_hist, enc_inds_hist = \
-        multi_agent_game(vqvae, aim_dict, **kwargs)
+    default_configs = [(3.0, 5.0), (9.0, 14.0), (12.0, 18.0)]
+    
+    if args.tp is not None and args.ts is not None:
+        configs = [(args.tp, args.ts)]
+        print(f"\n[Dynamic Mode] Validating specific target: TP={args.tp}, TS={args.ts}")
+    else:
+        configs = default_configs
+        print(f"\n[Standard Mode] Validating preset configurations: {configs}")
 
-    return AIMAdapter(K=CODEBOOK_SIZE).to_framework(
-        joint_hist, obs_acc_hist, shuffle_hist, enc_inds_hist
-    )
-
+    results = {}
+    for tp, ts in configs:
+        tag = f"tp={tp}_ts={ts}"
+        print(f"\n>>> Running Validation Case: {tag}")
+        rewards = []
+        accuracies = []
+        
+        for s in range(args.seeds):
+          
+            res = run_experiment(tp, ts, seed=s, max_rounds=args.rounds)
+            if res:
+                rewards.append(float(np.mean(res['joint_rewards'][-100:])))
+                accuracies.append(float(np.mean(res['observer_accs'][-WINDOW_SIZE:])))
+        
+        if rewards:
+            results[tag] = {
+                "final_mean_reward": float(np.mean(rewards)),
+                "final_std_reward": float(np.std(rewards)),
+                "final_mean_acc": float(np.mean(accuracies))
+            }
+    
+  
+    with open("validation_results.json", "w") as f:
+        json.dump(results, f, indent=4)
+    print("\n[Success] Validation complete. Data saved to validation_results.json")
 
 # ═══════════════════════════════════════════════════════════════════════
 # Metrics Calculation (Step 4)
@@ -551,7 +579,24 @@ if __name__ == "__main__":
                         help="sweep=Scan phase diagram | validate=Deep validation | full=Run both")
     parser.add_argument("--seeds",  type=int, default=5)
     parser.add_argument("--rounds", type=int, default=ROUNDS)
+
+
+
+    parser.add_argument('--tp', '--threshold_penalty', type=float, default=None, 
+                        help='Threshold Penalty (default: uses validation list if None)')
+    parser.add_argument('--ts', '--threshold_shuffle', type=float, default=None, 
+                        help='Threshold Shuffle (default: uses validation list if None)')
+
+
     args = parser.parse_args()
+
+    if args.mode == "sweep":
+        sweep(args)
+    elif args.mode == "validate":
+        validate(args)  # 確保這裡有呼叫剛新增的函式
+    elif args.mode == "full":
+        sweep(args)
+        validate(args)
 
     os.makedirs("figures", exist_ok=True)
 

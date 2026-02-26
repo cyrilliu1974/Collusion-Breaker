@@ -1,0 +1,8 @@
+Traceback (most recent call last):
+  File "C:\AI\Collusion-Breaker\aim_collusion_framework.py", line 606, in <module>
+    validate(args)  # 確保這裡有呼叫剛新增的函式
+    ^^^^^^^^^^^^^^
+  File "C:\AI\Collusion-Breaker\aim_collusion_framework.py", line 120, in validate
+    rewards.append(res['final_mean_reward'])
+                   ~~~^^^^^^^^^^^^^^^^^^^^^
+KeyError: 'final_mean_reward'

@@ -343,6 +343,10 @@ def multi_agent_game(vqvae, aim_dict, rounds=5, aim_seq_len=2, K_val=16,
     shuffle_rounds_history = []
     encoding_inds_history = []   # <- New: for aim_adapter use
     
+    # [New] Initialize EMA monitoring variables
+    ema_collusion = 0.0
+    alpha_ema = 0.05 
+
     all_labels = torch.arange(10).repeat(rounds // 10 + 1)[:rounds].tolist()
     random.shuffle(all_labels)
     label_to_indices = {i: [] for i in range(10)}
@@ -411,14 +415,20 @@ def multi_agent_game(vqvae, aim_dict, rounds=5, aim_seq_len=2, K_val=16,
         
         obs_probs = torch.softmax(obs_logits, dim=1)
         observer_accuracy = obs_probs[0, target_B_action_obs.item()].item()
-        collusion_score = max(0, joint_reward) / (observer_accuracy + 0.1)
+        
+        # [Modified] Calculate collusion score using EMA
+        instant_collusion_score = max(0, joint_reward) / (observer_accuracy + 0.1)
+        if i == 0:
+            ema_collusion = instant_collusion_score
+        else:
+            ema_collusion = alpha_ema * instant_collusion_score + (1 - alpha_ema) * ema_collusion
 
         # ==========================================
         # Circuit Breaker Defense A: Reward Shaping (Penalty)
         # ==========================================
         defense_action = "None"
         original_joint_reward = joint_reward
-        if enable_reward_shaping and collusion_score > threshold_penalty:
+        if enable_reward_shaping and ema_collusion > threshold_penalty:
             penalty_value = 2.0  # Force a penalty deduction of 2.0
             joint_reward -= penalty_value
             defense_action = f"Penalty(-{penalty_value})"
@@ -491,18 +501,21 @@ def multi_agent_game(vqvae, aim_dict, rounds=5, aim_seq_len=2, K_val=16,
         # ==========================================
         # Circuit Breaker Defense B: Codebook Shuffle
         # ==========================================
-        if enable_codebook_shuffle and collusion_score > threshold_shuffle:
+        if enable_codebook_shuffle and ema_collusion > threshold_shuffle:
             # Reset VQ-VAE Codebook weights, instantly destroying private protocols established by Agents
             vqvae.quantizer.codebook.weight.data.uniform_(-1/K_val, 1/K_val)
             defense_action = "Shuffle" if defense_action == "None" else defense_action + " & Shuffle"
             shuffle_rounds_history.append(i) # Log the round where the "earthquake" occurs
+            # Reset EMA to prevent continuous shuffling caused by lagging response
+            ema_collusion = 0.0
             
         # Write history for plotting
         joint_rewards_history.append(original_joint_reward)
         obs_accuracies_history.append(observer_accuracy)
 
         # Log AIM sequences and their interpretations in the AIM dictionary (Page 21).
-        obs_log_info = (f"Score: {collusion_score:.2f} | Obs_Acc: {observer_accuracy:.2f} | "
+        # [Modified] Display EMA score in the log
+        obs_log_info = (f"EMA_Score: {ema_collusion:.2f} | Obs_Acc: {observer_accuracy:.2f} | "
                         f"Joint_Rew: {original_joint_reward} -> {joint_reward} | Defense: {defense_action}")
         context_A = f"Round {i+1} (Label: {current_label}) [{obs_log_info}]"
         context_B = f"Round {i+1} (Label: {current_label}) (Response)"
@@ -518,31 +531,54 @@ def multi_agent_game(vqvae, aim_dict, rounds=5, aim_seq_len=2, K_val=16,
               f'Agent A AIM Seq={A_sampled_aim_sequence.tolist()[0]} (Interp: {A_action_human_interp}) | '
               f'Agent B AIM Seq={B_sampled_aim_sequence.tolist()[0]} (Interp: {B_action_human_interp}) | '
               f'Reward A={A_reward_indiv:.2f}, B={B_reward_indiv:.2f} | '
-              f'Score={collusion_score:.2f} ({defense_action}) | Obs_Acc={observer_accuracy:.2f}')
+              f'EMA_Score={ema_collusion:.2f} ({defense_action}) | Obs_Acc={observer_accuracy:.2f}')
 
     return A_rewards_history, B_rewards_history, joint_rewards_history, obs_accuracies_history, shuffle_rounds_history, encoding_inds_history
 
+def compute_ema(data, alpha=0.02):
+    r"""
+    Calculate Exponential Moving Average (EMA).
+    Formula: $EMA_t = \alpha \cdot x_t + (1 - \alpha) \cdot EMA_{t-1}$
+    A smaller alpha results in a smoother curve but slower reaction to changes.
+    """
+    if not data: return []
+    ema = [data[0]]
+    for x in data[1:]:
+        ema.append(alpha * x + (1 - alpha) * ema[-1])
+    return ema
+
 def visualize(joint_rewards, obs_accuracies, shuffle_rounds, strategy_name):
-    # Advanced visualization: Draw collusion evolution and circuit breaker earthquake graph
+    # Advanced visualization: Plot collusion evolution and circuit breaker (oscillation) chart
     fig, ax1 = plt.subplots(figsize=(12, 6))
 
-    # Red: Draw cooperation score (Joint Reward)
+    # Red axis: Plot cooperation score (Joint Reward)
     color_reward = 'tab:red'
     ax1.set_xlabel('Round (Training Steps)', fontsize=12)
     ax1.set_ylabel('Joint Reward (Max 10)', color=color_reward, fontsize=12, fontweight='bold')
-    ax1.plot(joint_rewards, color=color_reward, label='Joint Reward', alpha=0.7, linewidth=2)
+    
+    # Plot raw data (semi-transparent light color, showing true fluctuations)
+    ax1.plot(joint_rewards, color=color_reward, alpha=0.15, linewidth=1, label='Raw Reward')
+    # Plot EMA smoothed line (dark bold line, showing long-term trend)
+    joint_ema = compute_ema(joint_rewards, alpha=0.02)
+    ax1.plot(joint_ema, color=color_reward, label='Joint Reward (EMA)', linewidth=2.5)
+    
     ax1.tick_params(axis='y', labelcolor=color_reward)
     ax1.set_ylim(-1, 11) 
 
-    # Blue: Draw observer accuracy
+    # Blue axis: Plot observer accuracy
     ax2 = ax1.twinx()  
     color_acc = 'tab:blue'
     ax2.set_ylabel('Observer Accuracy (0 to 1)', color=color_acc, fontsize=12, fontweight='bold')
-    ax2.plot(obs_accuracies, color=color_acc, label='Observer Accuracy', alpha=0.8, linewidth=2)
+    
+    # Similarly process smoothing for Observer Accuracy
+    ax2.plot(obs_accuracies, color=color_acc, alpha=0.15, linewidth=1, label='Raw Accuracy')
+    acc_ema = compute_ema(obs_accuracies, alpha=0.02)
+    ax2.plot(acc_ema, color=color_acc, label='Observer Accuracy (EMA)', linewidth=2.5)
+    
     ax2.tick_params(axis='y', labelcolor=color_acc)
     ax2.set_ylim(0.0, 1.1)
 
-    # Explosion: Draw Codebook Shuffle earthquake marker
+    # Mark Codebook Shuffle occurrence points
     if shuffle_rounds:
         for r in shuffle_rounds:
             ax1.axvline(x=r, color='orange', linestyle='--', alpha=0.4)
@@ -557,11 +593,10 @@ def visualize(joint_rewards, obs_accuracies, shuffle_rounds, strategy_name):
     plt.title(f'Forced Transparency: Co-evolution of Reward and Observer Accuracy\n(Strategy: {strategy_name})', fontsize=14, fontweight='bold')
     ax1.grid(True, alpha=0.3)
     
-    # Save high quality chart
     plt.tight_layout()
-    file_name = 'marl_collusion_evolution.png'
+    file_name = f'evolution_tp{args.threshold_penalty}_ts{args.threshold_shuffle}.png'
     plt.savefig(file_name, dpi=300)
-    print(f"\n[Success] Chart saved to current directory: {file_name}")
+    print(f"\n[Success] Chart saved: {file_name}")
     plt.show()
 
 # =======================
