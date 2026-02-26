@@ -96,6 +96,15 @@ This section describes the three-module extension for **scientifically detecting
 
 Steps 1–3 are the **original research contributions** embedded in the training loop. Steps 4–6 are the **analytical and verification layer** provided by the framework. The two layers are connected by `aim_adapter.py`, which acts as a thin data bridge without coupling the two systems.
 
+### 6-Step Verification: Stress Test Parameters
+
+To verify the robustness of the defense framework against overt collusion, use the following validation command. These parameters represent a "High-Pressure Monitoring" state:
+
+```bash
+python aim_collusion_framework.py --mode validate --seeds 2 --rounds 1500 --tp 7.5 --ts 11.0
+
+Technical Interpretation of Parameters:--tp 7.5 (Threshold Penalty): The sensitivity trigger for defensive Reward Shaping. A lower value (e.g., 7.5) shrinks the agents' "safe zone," forcing them to either increase $Acc_{obs}$ or accept constant penalties.--ts 11.0 (Threshold Shuffle): The hard reset trigger. When the EMA score hits this ceiling, the communication protocol is forcefully disrupted to prevent stable private languages.alpha_ema 0.2: Configured as the "nerve sensitivity." A higher $\alpha$ ensures the system reacts to collusion bursts within 5-10 rounds.Research Note: Under these specific parameters, the agents may reach a state of "Overt Collusion" ($R_{joint} \approx 9.1, Acc_{obs} \approx 1.0$). This signifies that while the defense has successfully eliminated hidden signals, the penalty magnitude may need further adjustment to achieve absolute deterrence.
+
 ### Three Phases of Agent Behavior
 
 The framework identifies and tracks four distinct behavioral phases:
