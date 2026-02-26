@@ -13,6 +13,7 @@ Usage:
     python aim_collusion_framework.py --mode validate
     python aim_collusion_framework.py --mode full
 """
+import csv, os, json, argparse, subprocess  
 
 import numpy as np
 import matplotlib
@@ -63,64 +64,52 @@ PHASE_NUM = {k: i for i, k in enumerate(PHASE_COLORS)}
 # ★ Training Loop Slot - Calls real AIM training, bridged via adapter ★
 # ═══════════════════════════════════════════════════════════════════════
 
-def run_experiment(seed, rounds, tp, ts):
- 
+def run_experiment(seed, rounds, tp, ts, alpha_ema=0.2): 
+    output_file = f"temp_result_{seed}_{tp}_{ts}.json"
     cmd = [
         "python", "vqvae_agents_AIM.py",
         f"--rounds={rounds}",
         f"--threshold_penalty={tp}",
         f"--threshold_shuffle={ts}",
-        "--enable_reward_shaping",    
-        "--enable_codebook_shuffle"   
+        f"--alpha_ema={alpha_ema}",
+        "--enable_reward_shaping",
+        "--enable_codebook_shuffle",
+        f"--output_file={output_file}"
     ]
     
-    try:
-        print(f"Running Seed {seed}: {' '.join(cmd)}")
-        result = subprocess.run(cmd, check=True) 
-        
- 
-        return {"final_mean_reward": 0, "final_mean_acc": 0} 
-    except Exception as e:
-        print(f"Error: {e}")
-        return None
+    print(f"\n[Running] Seed {seed} | TP={tp} | TS={ts} | Alpha={alpha_ema}")
+    subprocess.run(cmd, check=True)
+    with open(output_file, "r") as f:
+        data = json.load(f)
+    if os.path.exists(output_file):
+        os.remove(output_file)
+    for k in ["joint_rewards", "observer_accs"]:
+        if k in data:
+            data[k] = np.array(data[k], dtype=float)
+    if "codebook_usages" in data:
+        data["codebook_usages"] = [np.array(u, dtype=float) for u in data["codebook_usages"]]
+    return data
 
 def validate(args):
-
-
-    default_configs = [(3.0, 5.0), (9.0, 14.0), (12.0, 18.0)]
     
-    if args.tp is not None and args.ts is not None:
+    if args.tp and args.ts:
         configs = [(args.tp, args.ts)]
-        print(f"\n[Dynamic Mode] Validating specific target: TP={args.tp}, TS={args.ts}")
     else:
-        configs = default_configs
-        print(f"\n[Standard Mode] Validating preset configurations: {configs}")
+        configs = [(3.0, 5.0), (9.0, 14.0), (12.0, 18.0)]
 
+    alpha_ema = 0.2  
     results = {}
+
     for tp, ts in configs:
-        tag = f"tp={tp}_ts={ts}"
-        print(f"\n>>> Running Validation Case: {tag}")
-        rewards = []
-        accuracies = []
-        
+        print(f"\n>>> Validating: TP={tp}, TS={ts}")
         for s in range(args.seeds):
-          
-            res = run_experiment(tp, ts, seed=s, max_rounds=args.rounds)
-            if res:
-                rewards.append(float(np.mean(res['joint_rewards'][-100:])))
-                accuracies.append(float(np.mean(res['observer_accs'][-WINDOW_SIZE:])))
-        
-        if rewards:
-            results[tag] = {
-                "final_mean_reward": float(np.mean(rewards)),
-                "final_std_reward": float(np.std(rewards)),
-                "final_mean_acc": float(np.mean(accuracies))
-            }
-    
-  
-    with open("validation_results.json", "w") as f:
-        json.dump(results, f, indent=4)
-    print("\n[Success] Validation complete. Data saved to validation_results.json")
+             
+            success = run_experiment(seed=s, rounds=args.rounds, tp=tp, ts=ts, alpha_ema=alpha_ema)
+            
+            if not success:
+                print(f"Warning: Seed {s} failed to complete.")
+
+    print("\n[Success] Experiment sequence finished.")
 
 # ═══════════════════════════════════════════════════════════════════════
 # Metrics Calculation (Step 4)
@@ -290,7 +279,7 @@ def perform_threshold_sweep(penalty_range:  Tuple[float, float] = (3.0, 18.0),
                 seed_rvars, seed_jsds = [], []
 
                 for seed in range(num_seeds):
-                    data    = run_experiment(tp, ts, seed)
+                    data    = run_experiment(seed=seed, rounds=ROUNDS, tp=tp, ts=ts)
                     rv      = sliding_variance(data["joint_rewards"], WINDOW_SIZE)
                     jsd     = jsd_rep_shift(data["codebook_usages"], WINDOW_SIZE)
                     rv, jsd = align_metrics(rv, jsd)   # <- bug fix
@@ -402,7 +391,7 @@ def validate_thresholds(specific_thresholds: List[Tuple[float, float]],
         }
 
         for seed in range(num_seeds):
-            data  = run_experiment(tp, ts, seed, rounds)
+            data  = run_experiment(seed=seed, rounds=rounds, tp=tp, ts=ts)
             rv    = sliding_variance(data["joint_rewards"], WINDOW_SIZE)
             jsd   = jsd_rep_shift(data["codebook_usages"], WINDOW_SIZE)
             norm  = norm_rep_shift(data["codebook_usages"], WINDOW_SIZE)
@@ -580,27 +569,18 @@ if __name__ == "__main__":
     parser.add_argument("--seeds",  type=int, default=5)
     parser.add_argument("--rounds", type=int, default=ROUNDS)
 
-
-
-    parser.add_argument('--tp', '--threshold_penalty', type=float, default=None, 
-                        help='Threshold Penalty (default: uses validation list if None)')
-    parser.add_argument('--ts', '--threshold_shuffle', type=float, default=None, 
-                        help='Threshold Shuffle (default: uses validation list if None)')
-
+    parser.add_argument('--tp', '--threshold_penalty', type=float, default=7.5)
+    parser.add_argument('--ts', '--threshold_shuffle', type=float, default=11.0)
+    parser.add_argument('--alpha_ema', type=float, default=0.2)
 
     args = parser.parse_args()
 
-    if args.mode == "sweep":
-        sweep(args)
-    elif args.mode == "validate":
-        validate(args)  # 確保這裡有呼叫剛新增的函式
-    elif args.mode == "full":
-        sweep(args)
-        validate(args)
-
     os.makedirs("figures", exist_ok=True)
 
-    SPECIFIC_THRESHOLDS = [(3.0, 5.0), (9.0, 14.0), (12.0, 18.0)]
+    if args.tp and args.ts:
+        SPECIFIC_THRESHOLDS = [(args.tp, args.ts)]
+    else:
+        SPECIFIC_THRESHOLDS = [(3.0, 5.0), (9.0, 14.0), (12.0, 18.0)]
 
     if args.mode in ("sweep", "full"):
         print("=" * 60)

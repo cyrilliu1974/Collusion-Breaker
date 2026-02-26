@@ -1,23 +1,7 @@
 {
-  "tp=3.0_ts=5.0": {
-    "final_mean_reward": 9.17,
-    "final_std_reward": 0.9854440623394105,
-    "final_mean_acc": 0.9993029004335403
-  },
-  "tp=9.0_ts=14.0": {
-    "final_mean_reward": 9.06,
-    "final_std_reward": 0.9981983770774225,
-    "final_mean_acc": 0.9997011017799378
-  },
-  "tp=12.0_ts=18.0": {
-    "final_mean_reward": 9.0,
-    "final_std_reward": 1.0,
-    "final_mean_acc": 0.9996688497066498
-  },
-  "stat_test": {
-    "comparison": "tp=3.0_ts=5.0 vs tp=12.0_ts=18.0",
-    "t": 0.17124172350127778,
-    "p": 0.8797948470911994,
-    "significant": false
+  "tp=7.5_ts=11.0": {
+    "final_mean_reward": 9.08,
+    "final_std_reward": 0.9967948635501689,
+    "final_mean_acc": 0.9989176768064499
   }
 }

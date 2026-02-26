@@ -317,7 +317,7 @@ def train_vqvae(epochs, K_val, D_val):
 def multi_agent_game(vqvae, aim_dict, rounds=5, aim_seq_len=2, K_val=16, 
                      reflection_strategy='none', reflection_coeff=0.1, gamma_rl=0.99, entropy_coeff=0.01,
                      enable_reward_shaping=False, enable_codebook_shuffle=False, 
-                     threshold_penalty=12.0, threshold_shuffle=18.0): 
+                     threshold_penalty=12.0, threshold_shuffle=18.0, alpha_ema=0.2): 
     # Implements the multi-agent game using the AIM framework, with REINFORCE and reflection strategies (Pages 14-15).
     # Freezes VQ-VAE parameters to focus on policy learning (Page 7).
     for param in vqvae.parameters():
@@ -345,7 +345,7 @@ def multi_agent_game(vqvae, aim_dict, rounds=5, aim_seq_len=2, K_val=16,
     
     # [New] Initialize EMA monitoring variables
     ema_collusion = 0.0
-    alpha_ema = 0.05 
+ 
 
     all_labels = torch.arange(10).repeat(rounds // 10 + 1)[:rounds].tolist()
     random.shuffle(all_labels)
@@ -597,7 +597,6 @@ def visualize(joint_rewards, obs_accuracies, shuffle_rounds, strategy_name):
     file_name = f'evolution_tp{args.threshold_penalty}_ts{args.threshold_shuffle}.png'
     plt.savefig(file_name, dpi=300)
     print(f"\n[Success] Chart saved: {file_name}")
-    plt.show()
 
 # =======================
 # Main Execution with CLI
@@ -623,7 +622,9 @@ if __name__ == '__main__':
     parser.add_argument('--enable_codebook_shuffle', action='store_true', help='Enable Defense B: Reset codebook when collusion score severely exceeds threshold')
     parser.add_argument('--threshold_penalty', type=float, default=12.0, help='Collusion score threshold to trigger Reward Shaping')
     parser.add_argument('--threshold_shuffle', type=float, default=18.0, help='Collusion score threshold to trigger Codebook Shuffle')
-    
+    parser.add_argument('--alpha_ema', type=float, default=0.2)
+    parser.add_argument('--output_file', type=str, default='', help='Path to save JSON metrics')
+
     args = parser.parse_args()
 
     aim_dict = AIMDictionary()
@@ -640,7 +641,8 @@ if __name__ == '__main__':
         enable_reward_shaping=args.enable_reward_shaping,
         enable_codebook_shuffle=args.enable_codebook_shuffle,
         threshold_penalty=args.threshold_penalty,
-        threshold_shuffle=args.threshold_shuffle
+        threshold_shuffle=args.threshold_shuffle,
+        alpha_ema=args.alpha_ema
     )
     aim_dict.save()
     
@@ -653,3 +655,15 @@ if __name__ == '__main__':
     
     # Call advanced visualization function
     visualize(joint_hist, obs_acc_hist, shuffle_hist, args.reflection_strategy)
+    
+    if args.output_file:
+        import copy
+        import numpy as np
+        save_data = copy.deepcopy(framework_data)
+        for k, v in save_data.items():
+            if isinstance(v, np.ndarray):
+                save_data[k] = v.tolist()
+            elif isinstance(v, list) and len(v) > 0 and isinstance(v[0], np.ndarray):
+                save_data[k] = [x.tolist() for x in v]
+        with open(args.output_file, 'w') as f:
+            json.dump(save_data, f)
