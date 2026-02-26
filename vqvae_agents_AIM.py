@@ -10,8 +10,10 @@ import argparse
 import random
 import torch.distributions
 import os
-from datetime import datetime
 import json
+
+# Prevent OpenMP multiple initialization crash (forrtl: error (200))
+os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 
 # =======================
 #This program implements "AI Mother Tongue: Self-Emergent Communication in MARL via Endogenous Symbol Systems" arXiv:2507.10566
@@ -339,6 +341,7 @@ def multi_agent_game(vqvae, aim_dict, rounds=5, aim_seq_len=2, K_val=16,
     joint_rewards_history = []
     obs_accuracies_history = []
     shuffle_rounds_history = []
+    encoding_inds_history = []   # ← 新增：供 aim_adapter 使用
     
     all_labels = torch.arange(10).repeat(rounds // 10 + 1)[:rounds].tolist()
     random.shuffle(all_labels)
@@ -363,6 +366,11 @@ def multi_agent_game(vqvae, aim_dict, rounds=5, aim_seq_len=2, K_val=16,
             x, _ = test_data[idx]
         x = x.unsqueeze(0)
         current_label_tensor = torch.tensor([current_label])
+
+        # 記錄 VQ-VAE codebook 使用索引（供 aim_adapter 橋接至 framework）
+        with torch.no_grad():
+            _, _, _, enc_inds = vqvae(x)
+        encoding_inds_history.append(enc_inds[0].item())
 
         # Agent A generates AIM sequence using policy network (Page 11).
         A_aim_logits_policy, _ = agentA(x, current_label_tensor, mode='policy', opponent_aim_sequence=torch.zeros((1,aim_seq_len), dtype=torch.long))
@@ -512,7 +520,7 @@ def multi_agent_game(vqvae, aim_dict, rounds=5, aim_seq_len=2, K_val=16,
               f'Reward A={A_reward_indiv:.2f}, B={B_reward_indiv:.2f} | '
               f'Score={collusion_score:.2f} ({defense_action}) | Obs_Acc={observer_accuracy:.2f}')
 
-    return A_rewards_history, B_rewards_history, joint_rewards_history, obs_accuracies_history, shuffle_rounds_history
+    return A_rewards_history, B_rewards_history, joint_rewards_history, obs_accuracies_history, shuffle_rounds_history, encoding_inds_history
 
 def visualize(joint_rewards, obs_accuracies, shuffle_rounds, strategy_name):
     # 進階視覺化：繪製共謀演化與熔斷機制地震圖
@@ -586,8 +594,8 @@ if __name__ == '__main__':
     aim_dict = AIMDictionary()
     vqvae = train_vqvae(args.epochs, args.K, args.D)
     
-    # 接收 5 個回傳值，並傳入熔斷參數
-    A_rewards, B_rewards, joint_hist, obs_acc_hist, shuffle_hist = multi_agent_game(
+    # 接收 6 個回傳值（新增 encoding_inds_hist）
+    A_rewards, B_rewards, joint_hist, obs_acc_hist, shuffle_hist, enc_inds_hist = multi_agent_game(
         vqvae, aim_dict, rounds=args.rounds,
         aim_seq_len=args.aim_seq_len, K_val=args.K,
         reflection_strategy=args.reflection_strategy,
@@ -600,6 +608,13 @@ if __name__ == '__main__':
         threshold_shuffle=args.threshold_shuffle
     )
     aim_dict.save()
+    
+    # 橋接至 framework（選用：如需跑步驟4-6分析時使用）
+    from aim_adapter import AIMAdapter
+    adapter = AIMAdapter(K=args.K)
+    framework_data = adapter.to_framework(
+        joint_hist, obs_acc_hist, shuffle_hist, enc_inds_hist
+    )
     
     # 呼叫進階視覺化函數
     visualize(joint_hist, obs_acc_hist, shuffle_hist, args.reflection_strategy)
