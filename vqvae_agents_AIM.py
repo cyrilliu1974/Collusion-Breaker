@@ -87,8 +87,8 @@ class VQVAE(nn.Module):
         return x_hat, z_e, z_q, encoding_inds
 
 # =======================
-# Baseline Observer: 監控者模型
-# 任務：僅憑 Agent A 的離散 AIM 符號，預測 Agent B 的實際動作 (C/D)
+# Baseline Observer: Supervisor model
+# Task: Predict Agent B's actual action (C/D) based solely on Agent A's discrete AIM symbols
 # =======================
 class BaselineObserver(nn.Module):
     def __init__(self, aim_seq_len=2, K=16, quantizer_D=64):
@@ -98,7 +98,7 @@ class BaselineObserver(nn.Module):
             nn.Flatten(),
             nn.Linear(aim_seq_len * quantizer_D, 64),
             nn.ReLU(),
-            nn.Linear(64, 2)  # 輸出 2 個 Logit 對應 C(0) 或 D(1)
+            nn.Linear(64, 2)  # Output 2 Logits corresponding to C(0) or D(1)
         )
 
     def forward(self, aim_sequence):
@@ -325,7 +325,7 @@ def multi_agent_game(vqvae, aim_dict, rounds=5, aim_seq_len=2, K_val=16,
     agentA = AgentA(vqvae, aim_seq_len, K_val)
     agentB = AgentB(vqvae, aim_seq_len, K_val)
     
-    # 初始化 BaselineObserver 與其優化器
+    # Initialize BaselineObserver and its optimizer
     observer = BaselineObserver(aim_seq_len, K_val, vqvae.quantizer.D)
     optimizer_obs = optim.Adam(observer.parameters(), lr=1e-3)
     
@@ -337,11 +337,11 @@ def multi_agent_game(vqvae, aim_dict, rounds=5, aim_seq_len=2, K_val=16,
     test_data = torchvision.datasets.MNIST(root='./data', train=False, download=True, transform=transform)
     
     A_rewards_history, B_rewards_history = [], []
-    # 用於繪圖的歷史數據追蹤器
+    # Historical data trackers for plotting
     joint_rewards_history = []
     obs_accuracies_history = []
     shuffle_rounds_history = []
-    encoding_inds_history = []   # ← 新增：供 aim_adapter 使用
+    encoding_inds_history = []   # <- New: for aim_adapter use
     
     all_labels = torch.arange(10).repeat(rounds // 10 + 1)[:rounds].tolist()
     random.shuffle(all_labels)
@@ -367,7 +367,7 @@ def multi_agent_game(vqvae, aim_dict, rounds=5, aim_seq_len=2, K_val=16,
         x = x.unsqueeze(0)
         current_label_tensor = torch.tensor([current_label])
 
-        # 記錄 VQ-VAE codebook 使用索引（供 aim_adapter 橋接至 framework）
+        # Record VQ-VAE codebook usage indices (for aim_adapter to bridge to framework)
         with torch.no_grad():
             _, _, _, enc_inds = vqvae(x)
         encoding_inds_history.append(enc_inds[0].item())
@@ -399,7 +399,7 @@ def multi_agent_game(vqvae, aim_dict, rounds=5, aim_seq_len=2, K_val=16,
         joint_reward = A_reward_indiv + B_reward_indiv 
 
         # ==========================================
-        # Observer 監控與 Collusion Score 計算
+        # Observer Monitoring and Collusion Score Calculation
         # ==========================================
         target_B_action_obs = torch.tensor([0 if B_action_human_interp == 'C' else 1], dtype=torch.long)
         obs_logits = observer(A_sampled_aim_sequence)
@@ -414,12 +414,12 @@ def multi_agent_game(vqvae, aim_dict, rounds=5, aim_seq_len=2, K_val=16,
         collusion_score = max(0, joint_reward) / (observer_accuracy + 0.1)
 
         # ==========================================
-        # 熔斷機制防禦 A：Reward Shaping (懲罰)
+        # Circuit Breaker Defense A: Reward Shaping (Penalty)
         # ==========================================
         defense_action = "None"
         original_joint_reward = joint_reward
         if enable_reward_shaping and collusion_score > threshold_penalty:
-            penalty_value = 2.0  # 強制扣除 2.0 分的懲罰
+            penalty_value = 2.0  # Force a penalty deduction of 2.0
             joint_reward -= penalty_value
             defense_action = f"Penalty(-{penalty_value})"
 
@@ -489,15 +489,15 @@ def multi_agent_game(vqvae, aim_dict, rounds=5, aim_seq_len=2, K_val=16,
         scheduler_B.step()
 
         # ==========================================
-        # 熔斷機制防禦 B：Codebook Shuffle (洗牌)
+        # Circuit Breaker Defense B: Codebook Shuffle
         # ==========================================
         if enable_codebook_shuffle and collusion_score > threshold_shuffle:
-            # 重置 VQ-VAE Codebook 權重，瞬間摧毀 Agent 建立的私有協議
+            # Reset VQ-VAE Codebook weights, instantly destroying private protocols established by Agents
             vqvae.quantizer.codebook.weight.data.uniform_(-1/K_val, 1/K_val)
             defense_action = "Shuffle" if defense_action == "None" else defense_action + " & Shuffle"
-            shuffle_rounds_history.append(i) # 紀錄發生地震的回合
+            shuffle_rounds_history.append(i) # Log the round where the "earthquake" occurs
             
-        # 寫入歷史供畫圖使用
+        # Write history for plotting
         joint_rewards_history.append(original_joint_reward)
         obs_accuracies_history.append(observer_accuracy)
 
@@ -523,10 +523,10 @@ def multi_agent_game(vqvae, aim_dict, rounds=5, aim_seq_len=2, K_val=16,
     return A_rewards_history, B_rewards_history, joint_rewards_history, obs_accuracies_history, shuffle_rounds_history, encoding_inds_history
 
 def visualize(joint_rewards, obs_accuracies, shuffle_rounds, strategy_name):
-    # 進階視覺化：繪製共謀演化與熔斷機制地震圖
+    # Advanced visualization: Draw collusion evolution and circuit breaker earthquake graph
     fig, ax1 = plt.subplots(figsize=(12, 6))
 
-    # 🔴 繪製協作分數 (Joint Reward)
+    # Red: Draw cooperation score (Joint Reward)
     color_reward = 'tab:red'
     ax1.set_xlabel('Round (Training Steps)', fontsize=12)
     ax1.set_ylabel('Joint Reward (Max 10)', color=color_reward, fontsize=12, fontweight='bold')
@@ -534,7 +534,7 @@ def visualize(joint_rewards, obs_accuracies, shuffle_rounds, strategy_name):
     ax1.tick_params(axis='y', labelcolor=color_reward)
     ax1.set_ylim(-1, 11) 
 
-    # 🔵 繪製監控者準確率 (Observer Accuracy)
+    # Blue: Draw observer accuracy
     ax2 = ax1.twinx()  
     color_acc = 'tab:blue'
     ax2.set_ylabel('Observer Accuracy (0 to 1)', color=color_acc, fontsize=12, fontweight='bold')
@@ -542,14 +542,14 @@ def visualize(joint_rewards, obs_accuracies, shuffle_rounds, strategy_name):
     ax2.tick_params(axis='y', labelcolor=color_acc)
     ax2.set_ylim(0.0, 1.1)
 
-    # 💥 繪製 Codebook Shuffle 的「地震」標記
+    # Explosion: Draw Codebook Shuffle earthquake marker
     if shuffle_rounds:
         for r in shuffle_rounds:
             ax1.axvline(x=r, color='orange', linestyle='--', alpha=0.4)
             ax1.plot(r, -0.5, marker='*', color='darkorange', markersize=8)
-        ax1.plot([], [], marker='*', color='darkorange', linestyle='None', markersize=8, label='💥 Codebook Shuffle Triggered')
+        ax1.plot([], [], marker='*', color='darkorange', linestyle='None', markersize=8, label='Codebook Shuffle Triggered')
 
-    # 合併圖例
+    # Merge legends
     lines_1, labels_1 = ax1.get_legend_handles_labels()
     lines_2, labels_2 = ax2.get_legend_handles_labels()
     ax1.legend(lines_1 + lines_2, labels_1 + labels_2, loc='lower right', fontsize=11)
@@ -557,11 +557,11 @@ def visualize(joint_rewards, obs_accuracies, shuffle_rounds, strategy_name):
     plt.title(f'Forced Transparency: Co-evolution of Reward and Observer Accuracy\n(Strategy: {strategy_name})', fontsize=14, fontweight='bold')
     ax1.grid(True, alpha=0.3)
     
-    # 儲存高畫質圖表
+    # Save high quality chart
     plt.tight_layout()
     file_name = 'marl_collusion_evolution.png'
     plt.savefig(file_name, dpi=300)
-    print(f"\n[成功] 圖表已儲存至當前目錄: {file_name}")
+    print(f"\n[Success] Chart saved to current directory: {file_name}")
     plt.show()
 
 # =======================
@@ -583,18 +583,18 @@ if __name__ == '__main__':
     parser.add_argument('--gamma_rl', type=float, default=0.99, help='Discount factor for RL rewards (gamma_rl in A2C)')
     parser.add_argument('--entropy_coeff', type=float, default=0.01, help='Initial coefficient for entropy regularization')
     
-    # 混合熔斷機制 (Circuit Breaker) 參數
-    parser.add_argument('--enable_reward_shaping', action='store_true', help='開啟防禦 A：當共謀分數過高時給予懲罰')
-    parser.add_argument('--enable_codebook_shuffle', action='store_true', help='開啟防禦 B：當共謀分數嚴重超標時重置代碼簿')
-    parser.add_argument('--threshold_penalty', type=float, default=12.0, help='觸發 Reward Shaping 的共謀分數閾值')
-    parser.add_argument('--threshold_shuffle', type=float, default=18.0, help='觸發 Codebook Shuffle 的共謀分數閾值')
+    # Mixed Circuit Breaker constraints
+    parser.add_argument('--enable_reward_shaping', action='store_true', help='Enable Defense A: Apply penalty when collusion score is too high')
+    parser.add_argument('--enable_codebook_shuffle', action='store_true', help='Enable Defense B: Reset codebook when collusion score severely exceeds threshold')
+    parser.add_argument('--threshold_penalty', type=float, default=12.0, help='Collusion score threshold to trigger Reward Shaping')
+    parser.add_argument('--threshold_shuffle', type=float, default=18.0, help='Collusion score threshold to trigger Codebook Shuffle')
     
     args = parser.parse_args()
 
     aim_dict = AIMDictionary()
     vqvae = train_vqvae(args.epochs, args.K, args.D)
     
-    # 接收 6 個回傳值（新增 encoding_inds_hist）
+    # Receive 6 return values (added encoding_inds_hist)
     A_rewards, B_rewards, joint_hist, obs_acc_hist, shuffle_hist, enc_inds_hist = multi_agent_game(
         vqvae, aim_dict, rounds=args.rounds,
         aim_seq_len=args.aim_seq_len, K_val=args.K,
@@ -609,12 +609,12 @@ if __name__ == '__main__':
     )
     aim_dict.save()
     
-    # 橋接至 framework（選用：如需跑步驟4-6分析時使用）
+    # Bridge to framework (Optional: Use when running steps 4-6 for analysis)
     from aim_adapter import AIMAdapter
     adapter = AIMAdapter(K=args.K)
     framework_data = adapter.to_framework(
         joint_hist, obs_acc_hist, shuffle_hist, enc_inds_hist
     )
     
-    # 呼叫進階視覺化函數
+    # Call advanced visualization function
     visualize(joint_hist, obs_acc_hist, shuffle_hist, args.reflection_strategy)

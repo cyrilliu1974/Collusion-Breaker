@@ -25,10 +25,10 @@ class EnhancedAIMDictionary:
                 print(f"Warning: {self.file_path} is corrupted or empty. Starting with empty dictionary.")
 
     def _generate_aim_id(self, aim_sequence, context, round_num, agent_id):
-        # 創建一個更具描述性的AIM_ID，結合序列、回合、代理ID和部分上下文
-        # 由於 aim_sequence 是列表，直接用 str(aim_sequence)
-        # context 可以是 dict, 這裡簡化為字符串形式
-        context_str = str(context.get('context', '')) # 確保上下文為字符串，避免複雜對象作為ID一部分
+        # Create a more descriptive AIM_ID, combining sequence, round, agent ID and partial context
+        # Since aim_sequence is a list, use str(aim_sequence) directly
+        # context can be a dict, here simplified to a string format
+        context_str = str(context.get('context', '')) # Ensure context is a string, preventing complex objects from being part of ID
         return f"{agent_id}_R{round_num}_{str(aim_sequence)}"
 
     def add_entry_with_reflection(self, aim_sequence, human_interpretation, context, 
@@ -42,19 +42,19 @@ class EnhancedAIMDictionary:
                 'human_label': human_interpretation,
                 'first_seen_round': round_num,
                 'contexts': [], # List of dicts: {'context_detail': ..., 'round': ..., 'success_rate': ..., 'semantic_stability': ...}
-                'evolution_trace': [] # 可以用於追蹤AIM語義的演化
+                'evolution_trace': [] # Can be used to track the evolution of AIM semantics
             }
         
-        # 添加當前上下文詳細信息 (簡化 success_rate 和 semantic_stability 為佔位符)
+        # Add current context details (simplify success_rate and semantic_stability as placeholders)
         current_context_detail = {
-            'context_detail': context.get('context_detail', context), # 嘗試獲取詳細上下文，否則用原始context
+            'context_detail': context.get('context_detail', context), # Try to get detailed context, otherwise use raw context
             'round': round_num,
-            'success_rate': self._compute_success_rate(aim_id, round_num), # 簡化計算
-            'semantic_stability': self._compute_semantic_stability(aim_id, round_num) # 簡化計算
+            'success_rate': self._compute_success_rate(aim_id, round_num), # Simplified calculation
+            'semantic_stability': self._compute_semantic_stability(aim_id, round_num) # Simplified calculation
         }
         self.aim_entries[aim_id]['contexts'].append(current_context_detail)
         
-        # 關聯反省記錄
+        # Link reflection records
         if aim_id not in self.reflection_records:
             self.reflection_records[aim_id] = []
             
@@ -63,26 +63,26 @@ class EnhancedAIMDictionary:
             'agent_id': agent_id,
             'reflection_data': agent_reflection_data,
             'human_label': human_interpretation,
-            'timestamp': datetime.now().isoformat() # 使用 ISO 格式字符串
+            'timestamp': datetime.now().isoformat() # Use ISO format string
         })
         
         return aim_id
 
     def add_unified_record(self, record):
-        """添加完整的統一記錄，方便後續分析"""
+        """Add a complete unified record to facilitate later analysis"""
         self.unified_records_list.append(record)
 
     def _compute_success_rate(self, aim_id, current_round):
-        # 這是簡化計算，實際需要追踪每個AIM的行為結果（獎勵）
-        # 假設如果被解釋為C且獎勵高則成功，D且獎勵高則成功
-        # 為了DEMO，返回一個模擬值
-        return round(0.5 + 0.5 * (current_round % 100) / 100, 2) # 模擬隨時間變化
+        # This is a simplified calculation, actually need to track the behavioral outcome (reward) of each AIM
+        # Suppose it is successful if interpreted as C and reward is high, or D and reward is high
+        # For DEMO purposes, return a simulated value
+        return round(0.5 + 0.5 * (current_round % 100) / 100, 2) # Simulate change over time
 
     def _compute_semantic_stability(self, aim_id, current_round):
-        # 簡化計算：基於特定AIM_ID歷史human_label的一致性
-        # 實際需要遍歷 self.reflection_records[aim_id] 統計 human_label 的分佈
-        # 為了DEMO，返回一個模擬值
-        return round(0.7 + 0.3 * (current_round % 50) / 50, 2) # 模擬隨時間變化
+        # Simplified calculation: based on the consistency of the historical human_label of a specific AIM_ID
+        # Actually need to iterate through self.reflection_records[aim_id] to compute the distribution of human_label
+        # For DEMO purposes, return a simulated value
+        return round(0.7 + 0.3 * (current_round % 50) / 50, 2) # Simulate change over time
 
     def save(self):
         data_to_save = {
