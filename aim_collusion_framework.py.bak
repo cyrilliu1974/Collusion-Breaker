@@ -61,13 +61,10 @@ PHASE_NUM = {k: i for i, k in enumerate(PHASE_COLORS)}
 
 
 # ═══════════════════════════════════════════════════════════════════════
-# Training Loop Slot - Calls real AIM training, bridged via adapter
+# ★ Training Loop Slot - Calls real AIM training, bridged via adapter ★
 # ═══════════════════════════════════════════════════════════════════════
 
-def run_experiment(seed, rounds, tp, ts, alpha_ema=0.2,
-                   penalty_base=4.0, penalty_factor=1.0, max_penalty=15.0,
-                   freeze_duration=15, freeze_cooldown=20,
-                   survival_reward=0.1, gradient_penalty_coeff=2.5): 
+def run_experiment(seed, rounds, tp, ts, alpha_ema=0.2): 
     output_file = f"temp_result_{seed}_{tp}_{ts}.json"
     cmd = [
         "python", "vqvae_agents_AIM.py",
@@ -75,21 +72,12 @@ def run_experiment(seed, rounds, tp, ts, alpha_ema=0.2,
         f"--threshold_penalty={tp}",
         f"--threshold_shuffle={ts}",
         f"--alpha_ema={alpha_ema}",
-        f"--penalty_base={penalty_base}",
-        f"--penalty_factor={penalty_factor}",
-        f"--max_penalty={max_penalty}",
-        f"--freeze_duration={freeze_duration}",
-        f"--freeze_cooldown={freeze_cooldown}",
-        f"--survival_reward={survival_reward}",
-        f"--gradient_penalty_coeff={gradient_penalty_coeff}",
         "--enable_reward_shaping",
         "--enable_codebook_shuffle",
         f"--output_file={output_file}"
     ]
     
-    print(f"\n[Running] Seed {seed} | TP={tp} | TS={ts} | Alpha={alpha_ema} | "
-          f"PenBase={penalty_base} | PenFactor={penalty_factor} | MaxPen={max_penalty} | "
-          f"FreezeDur={freeze_duration} | FreezeCool={freeze_cooldown}")
+    print(f"\n[Running] Seed {seed} | TP={tp} | TS={ts} | Alpha={alpha_ema}")
     subprocess.run(cmd, check=True)
     with open(output_file, "r") as f:
         data = json.load(f)
@@ -116,16 +104,7 @@ def validate(args):
         print(f"\n>>> Validating: TP={tp}, TS={ts}")
         for s in range(args.seeds):
              
-            success = run_experiment(
-                seed=s, rounds=args.rounds, tp=tp, ts=ts, alpha_ema=alpha_ema,
-                penalty_base=getattr(args, 'penalty_base', 4.0),
-                penalty_factor=getattr(args, 'penalty_factor', 1.0),
-                max_penalty=getattr(args, 'max_penalty', 15.0),
-                freeze_duration=getattr(args, 'freeze_duration', 15),
-                freeze_cooldown=getattr(args, 'freeze_cooldown', 20),
-                survival_reward=getattr(args, 'survival_reward', 0.1),
-                gradient_penalty_coeff=getattr(args, 'gradient_penalty_coeff', 2.5),
-            )
+            success = run_experiment(seed=s, rounds=args.rounds, tp=tp, ts=ts, alpha_ema=alpha_ema)
             
             if not success:
                 print(f"Warning: Seed {s} failed to complete.")
@@ -513,7 +492,7 @@ def validate_thresholds(specific_thresholds: List[Tuple[float, float]],
             mean2=r2["final_mean_reward"], std2=r2["final_std_reward"], nobs2=num_seeds,
             equal_var=False
         )
-        sig = "[PASS] p < 0.05" if p_val < 0.05 else "[FAIL] n.s."
+        sig = "✅ p < 0.05" if p_val < 0.05 else "❌ n.s."
         print(f"\n[Welch t-test] {k1} vs {k2}")
         print(f"  t={t_stat:.3f}, p={p_val:.4f}  {sig}")
         all_results["stat_test"] = {
@@ -566,7 +545,7 @@ def plot_regime_comparison(results: Dict,
 
     if "stat_test" in results:
         st = results["stat_test"]
-        sig_txt = "[PASS] p<0.05" if st["significant"] else "[FAIL] n.s."
+        sig_txt = "✓ p<0.05" if st["significant"] else "✗ n.s."
         axes[0].annotate(
             f"{st['comparison']}\n{sig_txt} (t={st['t']:.2f}, p={st['p']:.4f})",
             xy=(0.02, 0.05), xycoords="axes fraction", fontsize=9,
@@ -593,14 +572,6 @@ if __name__ == "__main__":
     parser.add_argument('--tp', '--threshold_penalty', type=float, default=7.5)
     parser.add_argument('--ts', '--threshold_shuffle', type=float, default=11.0)
     parser.add_argument('--alpha_ema', type=float, default=0.2)
-    # ── Anti-Collusion Penalty Parameters (passed through to vqvae_agents_AIM.py) ──
-    parser.add_argument('--penalty_base',          type=float, default=4.0)
-    parser.add_argument('--penalty_factor',        type=float, default=1.0)
-    parser.add_argument('--max_penalty',           type=float, default=15.0)
-    parser.add_argument('--freeze_duration',       type=int,   default=15)
-    parser.add_argument('--freeze_cooldown',       type=int,   default=20)
-    parser.add_argument('--survival_reward',       type=float, default=0.1)
-    parser.add_argument('--gradient_penalty_coeff',type=float, default=2.5)
 
     args = parser.parse_args()
 
@@ -634,4 +605,4 @@ if __name__ == "__main__":
         with open("validation_results.json", "w") as f:
             json.dump(val_results, f, indent=2)
 
-    print("\n[DONE] All charts are in the figures/ folder")
+    print("\n✅ Done! All charts are in the figures/ folder")

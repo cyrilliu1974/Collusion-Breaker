@@ -1,7 +1,7 @@
 {
   "tp=7.5_ts=11.0": {
-    "final_mean_reward": 9.08,
-    "final_std_reward": 0.9967948635501689,
-    "final_mean_acc": 0.9989176768064499
+    "final_mean_reward": 9.06,
+    "final_std_reward": 0.9981983770774225,
+    "final_mean_acc": 0.9982800388336182
   }
 }

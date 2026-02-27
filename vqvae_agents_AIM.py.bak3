@@ -317,10 +317,7 @@ def train_vqvae(epochs, K_val, D_val):
 def multi_agent_game(vqvae, aim_dict, rounds=5, aim_seq_len=2, K_val=16, 
                      reflection_strategy='none', reflection_coeff=0.1, gamma_rl=0.99, entropy_coeff=0.01,
                      enable_reward_shaping=False, enable_codebook_shuffle=False, 
-                     threshold_penalty=12.0, threshold_shuffle=18.0, alpha_ema=0.2,
-                     penalty_base=4.0, penalty_factor=1.0, max_penalty=15.0,
-                     freeze_duration=15, freeze_cooldown=20,
-                     survival_reward=0.1, gradient_penalty_coeff=2.5): 
+                     threshold_penalty=12.0, threshold_shuffle=18.0, alpha_ema=0.2): 
     # Implements the multi-agent game using the AIM framework, with REINFORCE and reflection strategies (Pages 14-15).
     # Freezes VQ-VAE parameters to focus on policy learning (Page 7).
     for param in vqvae.parameters():
@@ -348,17 +345,7 @@ def multi_agent_game(vqvae, aim_dict, rounds=5, aim_seq_len=2, K_val=16,
     
     # [New] Initialize EMA monitoring variables
     ema_collusion = 0.0
-
-    # ==========================================
-    # [Anti-Collusion] State Variables
-    # reward_freeze_counter  : 未來獎勵凍結倒數 (長期剝奪機制)
-    # freeze_cooldown_counter: 凍結冷卻保護計數器（防止連續觸發導致習得性無助）
-    # post_shuffle_entropy_rounds : 洗牌後強制熵提升倒數
-    # ==========================================
-    reward_freeze_counter = 0
-    freeze_cooldown_counter = 0        # 冷卻保護：凍結結束後至少 freeze_cooldown 輪不可再觸發
-    post_shuffle_entropy_rounds = 0
-    WARMUP_ROUNDS = 50                 # 暖機保護：前 50 輪不觸發任何懲罰，防止 EMA 未穩定時誤傷
+ 
 
     all_labels = torch.arange(10).repeat(rounds // 10 + 1)[:rounds].tolist()
     random.shuffle(all_labels)
@@ -429,82 +416,22 @@ def multi_agent_game(vqvae, aim_dict, rounds=5, aim_seq_len=2, K_val=16,
         obs_probs = torch.softmax(obs_logits, dim=1)
         observer_accuracy = obs_probs[0, target_B_action_obs.item()].item()
         
-        # ==========================================
-        # [Fix] original_joint_reward 必須在 EMA 計算之前確立
-        # 確保 collusion score 反映真實博弈結果，不被凍結期的人工 0 污染
-        # ==========================================
-        original_joint_reward = joint_reward
-
         # [Modified] Calculate collusion score using EMA
-        # 使用 original_joint_reward（真實博弈結果）而非可能被凍結歸零的 joint_reward
-        instant_collusion_score = max(0, original_joint_reward) / (observer_accuracy + 0.1)
+        instant_collusion_score = max(0, joint_reward) / (observer_accuracy + 0.1)
         if i == 0:
             ema_collusion = instant_collusion_score
         else:
             ema_collusion = alpha_ema * instant_collusion_score + (1 - alpha_ema) * ema_collusion
 
         # ==========================================
-        # [Anti-Collusion Layer 1] Dynamic Shuffle Threshold
-        # 觀察者準確度越高 → ts_dynamic 自動下降，堵死「主動透明壓 Score」策略
-        # acc=1.0 → ts_dynamic = ts * 0.5 | acc=0.0 → ts_dynamic = ts * 1.0
-        # ==========================================
-        acc_normalized = min(observer_accuracy, 1.0)
-        ts_dynamic = threshold_shuffle * (1.0 - 0.5 * acc_normalized)
-
-        # ==========================================
-        # [Anti-Collusion Layer 2] Future Reward Freeze + Dynamic Graduated Penalty
-        # 核心改造：從「單回合扣分」升級為「長期剝奪」
-        # 只要共謀被偵測，接下來 FREEZE_DURATION 輪的獎勵清零
-        # 讓 RL 的長期期望 E[Return|Collusion] < E[Return|Defect]
+        # Circuit Breaker Defense A: Reward Shaping (Penalty)
         # ==========================================
         defense_action = "None"
-
-        # 冷卻保護計時器遞減（每輪都需要執行，不論是否在凍結期）
-        if freeze_cooldown_counter > 0:
-            freeze_cooldown_counter -= 1
-
-        if reward_freeze_counter > 0:
-            # ── 凍結期內 ────────────────────────────────────────────────────
-            # [Learned Helplessness Fix] 給予微小存活獎勵（survival_reward）
-            # 確保 Policy gradient 的 advantage 不會完全歸零導致梯度消失
-            # survival_reward 遠低於任何共謀收益，不會提供足夠的激勵恢復共謀
-            joint_reward = survival_reward
-            reward_freeze_counter -= 1
-            defense_action = f"Freeze({reward_freeze_counter}rounds_left,surv={survival_reward})"
-
-        elif enable_reward_shaping and ema_collusion > threshold_penalty                 and freeze_cooldown_counter == 0                 and i >= WARMUP_ROUNDS:
-            # ── 觸發懲罰（暖機保護 + 冷卻保護皆通過後才可觸發）────────────
-            # 動態階梯懲罰：超標幅度越大，扣越多
-            # 公式：penalty_base × (1 + penalty_factor × overshoot_ratio)
-            overshoot_ratio = (ema_collusion - threshold_penalty) / threshold_penalty
-            penalty_value = penalty_base * (1.0 + penalty_factor * overshoot_ratio)
-
-            # 雙層上限保護：
-            # 第一層（動態）：防止單輪因 ema 飆高爆炸，最多讓 reward 降至 -1
-            penalty_value = min(penalty_value, original_joint_reward + 1.0)
-            # 第二層（靜態硬上限）：絕對安全網，作為最後防線
-            penalty_value = min(penalty_value, max_penalty)
-
-            joint_reward -= penalty_value
-
-            # 啟動「未來獎勵凍結」——改變長期期望的關鍵
-            reward_freeze_counter = freeze_duration
-            # 同時啟動冷卻保護，凍結結束後至少 freeze_cooldown 輪內不可再次觸發
-            freeze_cooldown_counter = freeze_duration + freeze_cooldown
-
-            defense_action = f"Penalty(-{penalty_value:.2f})+Freeze({freeze_duration})"
-
-        # ==========================================
-        # [Anti-Collusion Layer 3] Anti-collusion Gradient Signal
-        # 在 Advantage 中注入額外負信號，阻止 Critic 把「被懲罰的收益」學習為正常預期基準
-        # 若不做此修正，Critic 會很快學會「把懲罰納入預期」，使懲罰被逐漸中和
-        # ==========================================
-        collusion_gradient_penalty = 0.0
+        original_joint_reward = joint_reward
         if enable_reward_shaping and ema_collusion > threshold_penalty:
-            # gradient_penalty_coeff 現在是 CLI 可調參數（預設 2.5）
-            collusion_gradient_penalty = -gradient_penalty_coeff * (ema_collusion / threshold_penalty)
-
-        effective_reward_for_learning = joint_reward + collusion_gradient_penalty
+            penalty_value = 2.0  # Force a penalty deduction of 2.0
+            joint_reward -= penalty_value
+            defense_action = f"Penalty(-{penalty_value})"
 
         # Centralized Critic evaluation by Agent A (Page 6).
         A_critic_input_z_e = agentA.vqvae.encoder(x)
@@ -515,22 +442,15 @@ def multi_agent_game(vqvae, aim_dict, rounds=5, aim_seq_len=2, K_val=16,
         A_critic_total_input = torch.cat([A_critic_input_combined_policy, B_aim_flattened], dim=1)
         A_value = agentA.value_net(A_critic_total_input).squeeze(-1)
 
-        # Compute A2C loss using effective_reward_for_learning (含 anti-collusion 梯度信號)
-        A_advantage = torch.tensor([effective_reward_for_learning], dtype=torch.float32) - A_value.cpu().detach()
+        # Compute A2C loss using joint reward and advantage (Page 8, policy gradient).
+        A_advantage = torch.tensor([joint_reward], dtype=torch.float32) - A_value.cpu().detach()
         loss_A_policy = - (A_log_probs * A_advantage.to(A_value.device))
-        loss_A_value = value_loss_fn(A_value, torch.tensor([effective_reward_for_learning], dtype=torch.float32).to(A_value.device))
-
-        # 洗牌後強制熵提升：阻止 Agent 快速收斂回原共謀協議
-        if post_shuffle_entropy_rounds > 0:
-            current_entropy_coeff = max(initial_entropy_coeff * (entropy_decay_rate ** i), 0.05)
-            post_shuffle_entropy_rounds -= 1
-        else:
-            current_entropy_coeff = initial_entropy_coeff * (entropy_decay_rate ** i)
-
+        loss_A_value = value_loss_fn(A_value, torch.tensor([joint_reward], dtype=torch.float32).to(A_value.device))
+        current_entropy_coeff = initial_entropy_coeff * (entropy_decay_rate ** i)
         loss_A = loss_A_policy + 0.5 * loss_A_value - current_entropy_coeff * A_entropy
 
-        # Agent B policy loss using shared advantage from Agent A's Critic (Page 8).
-        B_advantage = torch.tensor([effective_reward_for_learning], dtype=torch.float32) - A_value.cpu().detach()
+        # Agent B policy loss using shared advantage from Agent A’s Critic (Page 8).
+        B_advantage = torch.tensor([joint_reward], dtype=torch.float32) - A_value.cpu().detach()
         loss_B_policy = - (B_log_probs * B_advantage.to(A_value.device))
         loss_B = loss_B_policy - current_entropy_coeff * B_entropy
 
@@ -581,43 +501,22 @@ def multi_agent_game(vqvae, aim_dict, rounds=5, aim_seq_len=2, K_val=16,
         # ==========================================
         # Circuit Breaker Defense B: Codebook Shuffle
         # ==========================================
-        # [Modified] 使用 ts_dynamic（動態閾值）取代靜態 threshold_shuffle
-        if enable_codebook_shuffle and ema_collusion > ts_dynamic:
+        if enable_codebook_shuffle and ema_collusion > threshold_shuffle:
             # Reset VQ-VAE Codebook weights, instantly destroying private protocols established by Agents
             vqvae.quantizer.codebook.weight.data.uniform_(-1/K_val, 1/K_val)
-
-            # ==========================================
-            # [Critical Fix] 清除 Adam Optimizer 動量記憶
-            # 若不清除 m_t/v_t，Adam 會在數十輪內將 codebook 快速收斂回被洗掉的狀態
-            # 等於 shuffle 形同虛設
-            # ==========================================
-            for opt in [optimizer_A, optimizer_B]:
-                for group in opt.param_groups:
-                    for p in group['params']:
-                        if p in opt.state:
-                            opt.state[p] = {}
-
-            # 啟動洗牌後熵提升期（30輪），強制 Agent 探索新符號空間
-            post_shuffle_entropy_rounds = 30
-
             defense_action = "Shuffle" if defense_action == "None" else defense_action + " & Shuffle"
             shuffle_rounds_history.append(i) # Log the round where the "earthquake" occurs
             # Reset EMA to prevent continuous shuffling caused by lagging response
             ema_collusion = 0.0
             
         # Write history for plotting
-        # [Critical Fix] 記錄 joint_reward（凍結後的實際值），而非 original_joint_reward
-        # 這確保了 validate_thresholds 的 final_mean_reward 統計能正確反映防禦效果
-        # 若記錄 original_joint_reward，凍結期的 0 獎勵會消失，統計數據會顯示「防禦未生效」
-        joint_rewards_history.append(joint_reward)
+        joint_rewards_history.append(original_joint_reward)
         obs_accuracies_history.append(observer_accuracy)
 
         # Log AIM sequences and their interpretations in the AIM dictionary (Page 21).
         # [Modified] Display EMA score in the log
-        obs_log_info = (f"EMA_Score: {ema_collusion:.2f} | ts_dyn: {ts_dynamic:.2f} | "
-                        f"Obs_Acc: {observer_accuracy:.2f} | "
-                        f"Joint_Rew: {original_joint_reward} -> {joint_reward} | "
-                        f"Freeze: {reward_freeze_counter} | Defense: {defense_action}")
+        obs_log_info = (f"EMA_Score: {ema_collusion:.2f} | Obs_Acc: {observer_accuracy:.2f} | "
+                        f"Joint_Rew: {original_joint_reward} -> {joint_reward} | Defense: {defense_action}")
         context_A = f"Round {i+1} (Label: {current_label}) [{obs_log_info}]"
         context_B = f"Round {i+1} (Label: {current_label}) (Response)"
         
@@ -724,21 +623,6 @@ if __name__ == '__main__':
     parser.add_argument('--threshold_penalty', type=float, default=12.0, help='Collusion score threshold to trigger Reward Shaping')
     parser.add_argument('--threshold_shuffle', type=float, default=18.0, help='Collusion score threshold to trigger Codebook Shuffle')
     parser.add_argument('--alpha_ema', type=float, default=0.2)
-    # ── Anti-Collusion Penalty Parameters ──────────────────────────────────
-    parser.add_argument('--penalty_base',   type=float, default=4.0,
-                        help='Base penalty multiplier when collusion EMA exceeds tp')
-    parser.add_argument('--penalty_factor', type=float, default=1.0,
-                        help='Linear scale factor for excess-EMA in dynamic penalty')
-    parser.add_argument('--max_penalty',    type=float, default=15.0,
-                        help='Absolute hard cap on penalty value (static safety net)')
-    parser.add_argument('--freeze_duration',   type=int, default=15,
-                        help='Number of rounds to freeze reward to survival_reward after penalty trigger')
-    parser.add_argument('--freeze_cooldown',   type=int, default=20,
-                        help='Minimum rounds between freeze triggers (prevents learned helplessness)')
-    parser.add_argument('--survival_reward',   type=float, default=0.1,
-                        help='Non-zero reward during freeze period to prevent gradient vanishing')
-    parser.add_argument('--gradient_penalty_coeff', type=float, default=2.5,
-                        help='Coefficient for anti-collusion gradient signal injected into Advantage')
     parser.add_argument('--output_file', type=str, default='', help='Path to save JSON metrics')
 
     args = parser.parse_args()
@@ -758,14 +642,7 @@ if __name__ == '__main__':
         enable_codebook_shuffle=args.enable_codebook_shuffle,
         threshold_penalty=args.threshold_penalty,
         threshold_shuffle=args.threshold_shuffle,
-        alpha_ema=args.alpha_ema,
-        penalty_base=args.penalty_base,
-        penalty_factor=args.penalty_factor,
-        max_penalty=args.max_penalty,
-        freeze_duration=args.freeze_duration,
-        freeze_cooldown=args.freeze_cooldown,
-        survival_reward=args.survival_reward,
-        gradient_penalty_coeff=args.gradient_penalty_coeff,
+        alpha_ema=args.alpha_ema
     )
     aim_dict.save()
     
