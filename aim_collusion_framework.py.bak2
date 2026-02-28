@@ -61,7 +61,7 @@ PHASE_NUM = {k: i for i, k in enumerate(PHASE_COLORS)}
 
 
 # ═══════════════════════════════════════════════════════════════════════
-# ★ Training Loop Slot - Calls real AIM training, bridged via adapter ★
+# Training Loop Slot - Calls real AIM training, bridged via adapter
 # ═══════════════════════════════════════════════════════════════════════
 
 def run_experiment(seed, rounds, tp, ts, alpha_ema=0.2,
@@ -501,12 +501,6 @@ def validate_thresholds(specific_thresholds: List[Tuple[float, float]],
             "final_mean_reward": float(np.mean(R[:, -100:])),
             "final_std_reward":  float(np.std( R[:, -100:])),
             "final_mean_acc":    float(np.mean(A[:, -WINDOW_SIZE:])),
-            "seeds": {
-                f"seed_{i}": {
-                    "joint_rewards": seed_data["rewards"][i].tolist(),
-                    "observer_accs": seed_data["accs"][i].tolist()
-                } for i in range(num_seeds)
-            }
         }
 
     # ── Welch t-test: compare two extreme configurations ─────────────────────────────
@@ -519,7 +513,7 @@ def validate_thresholds(specific_thresholds: List[Tuple[float, float]],
             mean2=r2["final_mean_reward"], std2=r2["final_std_reward"], nobs2=num_seeds,
             equal_var=False
         )
-        sig = "✅ p < 0.05" if p_val < 0.05 else "❌ n.s."
+        sig = "[PASS] p < 0.05" if p_val < 0.05 else "[FAIL] n.s."
         print(f"\n[Welch t-test] {k1} vs {k2}")
         print(f"  t={t_stat:.3f}, p={p_val:.4f}  {sig}")
         all_results["stat_test"] = {
@@ -572,7 +566,7 @@ def plot_regime_comparison(results: Dict,
 
     if "stat_test" in results:
         st = results["stat_test"]
-        sig_txt = "✓ p<0.05" if st["significant"] else "✗ n.s."
+        sig_txt = "[PASS] p<0.05" if st["significant"] else "[FAIL] n.s."
         axes[0].annotate(
             f"{st['comparison']}\n{sig_txt} (t={st['t']:.2f}, p={st['p']:.4f})",
             xy=(0.02, 0.05), xycoords="axes fraction", fontsize=9,
@@ -607,8 +601,6 @@ if __name__ == "__main__":
     parser.add_argument('--freeze_cooldown',       type=int,   default=20)
     parser.add_argument('--survival_reward',       type=float, default=0.1)
     parser.add_argument('--gradient_penalty_coeff',type=float, default=2.5)
-    parser.add_argument('--output_file', type=str, default='validation_results.json',
-                        help='Output JSON filename for validation results (enables parallel runs)')
 
     args = parser.parse_args()
 
@@ -639,8 +631,7 @@ if __name__ == "__main__":
             num_seeds=args.seeds,
             rounds=args.rounds,
         )
-        with open(args.output_file, "w") as f:
+        with open("validation_results.json", "w") as f:
             json.dump(val_results, f, indent=2)
-        print(f"✅ Results saved to {args.output_file}")
 
-    print("\n✅ Done! All charts are in the figures/ folder")
+    print("\n[DONE] All charts are in the figures/ folder")
